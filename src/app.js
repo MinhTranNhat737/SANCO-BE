@@ -11,12 +11,12 @@ import { GameError } from './game.js';
 import {seats} from './room-game.js';
 import {liveState} from './wire.js';
 import {createActionGate} from './action-gate.js';
-import { credentials, createGuest, hashPassword, verifyPassword, sessionFor, issueSession, userView, validName } from './auth.js';
+import { credentials, createGuest, hashPassword, verifyPassword, sessionFor, issueSession, cookieOptions, userView, validName } from './auth.js';
 
 export async function createApplication(options = {}) {
   const db = options.db || await openDatabase(options.database);
   const app = express(), server = createServer(app);
-  const allowedOrigins = (options.origins || process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5173,http://localhost:5173').split(',');
+  const allowedOrigins = (options.origins || process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5173,http://localhost:5173').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
   const secureCookies = options.secureCookies ?? (process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production');
   const allowedOrigin = origin => !origin || allowedOrigins.includes(origin);
   // Reconnect resynchronizes from SQL. Avoid retaining every room packet in RAM.
@@ -45,7 +45,7 @@ export async function createApplication(options = {}) {
   const cleanup = setInterval(() => { const now = Date.now(); for (const [key, value] of limits) if (value.until < now) limits.delete(key); db.query('DELETE FROM sessions WHERE expires_at < $1', [now]).catch(() => {}); }, 60000);
   cleanup.unref();
   app.disable('x-powered-by');
-  if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
+  if (process.env.TRUST_PROXY === '1' || process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
   app.use((req, res, next) => {
     res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store', 'Vary': 'Origin' });
     const origin = req.headers.origin;
@@ -114,7 +114,7 @@ export async function createApplication(options = {}) {
   app.post('/api/auth/logout', required, async (req, res) => {
     await db.query('DELETE FROM sessions WHERE token_hash=$1', [req.user.token_hash]);
     disconnectSession(req.user.token_hash);
-    res.clearCookie('sc_session', { httpOnly: true, sameSite: 'lax', secure: secureCookies, path: '/' });
+    res.clearCookie('sc_session', cookieOptions(secureCookies));
     res.json({ ok: true });
   });
   app.get('/api/rooms', required, async (req, res) => res.json({ rooms: await rooms.mine(req.user.id,req.query.summary==='1') }));

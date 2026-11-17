@@ -40,11 +40,15 @@ export async function sessionFor(db, request) {
     WHERE s.token_hash = $1 AND s.expires_at > $2`, [digest(token), Date.now()]);
   return rows[0] || null;
 }
+export function cookieOptions(secure, maxAge) {
+  const sameSite = process.env.COOKIE_SAMESITE || (secure ? 'none' : 'lax');
+  return { httpOnly: true, sameSite, secure: sameSite === 'none' ? true : secure, path: '/', ...(maxAge !== undefined ? { maxAge } : {}) };
+}
 export async function issueSession(db, response, playerId, previousHash, secure) {
   const token = secret(), now = Date.now();
   await db.query('INSERT INTO sessions(token_hash, player_id, expires_at, created_at) VALUES($1,$2,$3,$4)', [digest(token), playerId, now + sessionAge, now]);
   if (previousHash) await db.query('DELETE FROM sessions WHERE token_hash = $1', [previousHash]);
-  response.cookie('sc_session', token, { httpOnly: true, sameSite: 'lax', secure, maxAge: sessionAge, path: '/' });
+  response.cookie('sc_session', token, cookieOptions(secure, sessionAge));
 }
 export async function createGuest(db) {
   const id = randomUUID();
