@@ -1,4 +1,4 @@
-import config from '../../shared/vietnam-estate.json' with {type:'json'};
+import config from './vietnam-estate.json' with {type:'json'};
 import {GameError} from './game.js';
 
 export const VN_EDITION=config.edition;
