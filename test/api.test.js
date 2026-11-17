@@ -7,14 +7,20 @@ import { createApplication } from '../src/app.js';
 let app, origin;
 before(async()=>{app=await createApplication({database:{memory:true},disableRateLimits:true});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${app.server.address().port}`;});
 after(async()=>{await app.close();});
-async function client(name='Người thử') {
+async function client(name='Người thử', register=true) {
   let cookie='';
   const call=async(path,body,method)=>{
     const response=await fetch(origin+'/api'+path,{method:method||(body?'POST':'GET'),headers:{...(cookie?{Cookie:cookie}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
     const setCookie=response.headers.get('set-cookie');if(setCookie)cookie=setCookie.split(';')[0];
     return {status:response.status,body:await response.json(),headers:response.headers};
   };
-  const initial=await call('/me');assert.equal(initial.status,200);await call('/me',{name},'PATCH');
+  const initial=await call('/me');assert.equal(initial.status,200);
+  if(register){
+    const reg=await call('/auth/register',{name,email:`${randomUUID()}@example.test`,password:'a-long-test-password'});
+    assert.equal(reg.status,201);
+  }else{
+    await call('/me',{name},'PATCH');
+  }
   return {call,get cookie(){return cookie},user:initial.body.user};
 }
 async function pair() { const a=await client('An'),b=await client('Bình');const creation=await a.call('/rooms',{minutes:5});assert.equal(creation.status,201);let room=creation.body.room;await b.call(`/rooms/${room.id}/join`,{token:creation.body.token});room=(await a.call(`/rooms/${room.id}`)).body.room;return {a,b,room,token:creation.body.token}; }
@@ -67,10 +73,13 @@ test('Clock timeout is persisted with no player action and restored on restart',
   await app.rooms.start();assert.equal((await app.rooms.read(active.id)).game.phase,'finished');
 });
 test('Registration preserves guest player, password is hashed, login restores history and logout revokes',async()=>{
-  const a=await client('Tài khoản');const before=a.user.id;const created=(await a.call('/rooms',{minutes:10})).body;
+  const host=await client('Chủ bàn');const created=(await host.call('/rooms',{minutes:10})).body;
+  const a=await client('Tài khoản',false);const before=a.user.id;
+  assert.equal((await a.call('/rooms',{minutes:10})).status,403);
+  assert.equal((await a.call(`/rooms/${created.room.id}/join`,{token:created.token})).status,200);
   const registered=await a.call('/auth/register',{name:'Minh',email:'minh@example.test',password:'a-long-test-password'});assert.equal(registered.status,201);assert.equal(registered.body.user.id,before);
   const {rows}=await app.db.query('SELECT password_hash FROM accounts WHERE email=$1',['minh@example.test']);assert.match(rows[0].password_hash,/^scrypt\$/);assert.equal(rows[0].password_hash.includes('a-long-test-password'),false);
-  const device=await client('Máy khác');assert.equal((await device.call('/auth/login',{email:'minh@example.test',password:'wrong-password-long'})).status,401);
+  const device=await client('Máy khác',false);assert.equal((await device.call('/auth/login',{email:'minh@example.test',password:'wrong-password-long'})).status,401);
   const logged=await device.call('/auth/login',{email:'MINH@example.test',password:'a-long-test-password'});assert.equal(logged.status,200);assert.equal(logged.body.user.id,before);assert.equal((await device.call(`/rooms/${created.room.id}`)).status,200);
   const oldCookie=device.cookie;await device.call('/auth/logout',{});const revoked=await fetch(origin+'/api/rooms',{headers:{Cookie:oldCookie}});assert.equal(revoked.status,401);
 });
@@ -156,7 +165,7 @@ test('Three-seat party rooms retain every seat, permission and history through r
 
 test('Go, draughts and tic-tac-toe room moves and new practice workers survive reload',async()=>{
   for(const kind of['go','checkers','tictactoe']){
-    const a=await client('A'),b=await client('B');const created=(await a.call('/rooms',{minutes:5,kind,side:'first'})).body;await b.call(`/rooms/${created.room.id}/join`,{token:created.token});
+    const a=await client('An'),b=await client('Bình');const created=(await a.call('/rooms',{minutes:5,kind,side:'first'})).body;await b.call(`/rooms/${created.room.id}/join`,{token:created.token});
     let room=(await a.call(`/rooms/${created.room.id}`)).body.room;room=await start(a,b,room);
     const moved=await a.call(`/rooms/${room.id}/actions`,{actionId:randomUUID(),version:room.version,action:'move',...room.game.legal[0]});assert.equal(moved.status,200,JSON.stringify(moved.body));assert.equal((await b.call(`/rooms/${room.id}`)).body.room.game.moves.length,1);
   }

@@ -51,7 +51,7 @@ after(async()=>{await app.close();});
 function client(){let cookie='';return {async call(route,body,status=200){const r=await fetch(origin+'/api'+route,{method:body?'POST':'GET',headers:{Cookie:cookie,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];const out=await r.json();assert.equal(r.status,status,JSON.stringify(out));return out;}};}
 test('New rooms persist legal play, deduplicate, save replays and rematch; practice workers reply through the real API',async()=>{
   for(const kind of ABSTRACT_KINDS){
-    const a=client(),b=client();await a.call('/me');await b.call('/me');const created=await a.call('/rooms',{kind,minutes:5,side:'first'},201);let room=created.room;
+    const a=client(),b=client();await a.call('/me');await b.call('/me');await a.call('/auth/register',{name:'Chủ',email:`${randomUUID()}@example.test`,password:'a-long-test-password'},201);const created=await a.call('/rooms',{kind,minutes:5,side:'first'},201);let room=created.room;
     await b.call(`/rooms/${room.id}/join`,{token:created.token});room=(await a.call(`/rooms/${room.id}`)).room;
     for(const user of[a,b])room=(await user.call(`/rooms/${room.id}/actions`,{action:'ready',actionId:randomUUID(),version:room.version})).room;
     room=(await a.call(`/rooms/${room.id}`)).room;const request={action:'move',actionId:randomUUID(),version:room.version,...room.game.legal[0]};room=(await a.call(`/rooms/${room.id}/actions`,request)).room;

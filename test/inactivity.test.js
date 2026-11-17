@@ -6,7 +6,7 @@ import { createApplication } from '../src/app.js';
 import { ROOM_INACTIVITY_MS } from '../src/rooms.js';
 import { PRACTICE_INACTIVITY_MS } from '../src/practice.js';
 
-async function makeClient(origin, name = 'Khách') {
+async function makeClient(origin, name = 'Khách', register = true) {
   let cookie = '';
   const call = async (path, body, method) => {
     const response = await fetch(origin + '/api' + path, {
@@ -20,7 +20,12 @@ async function makeClient(origin, name = 'Khách') {
   };
   const initial = await call('/me');
   assert.equal(initial.status, 200);
-  await call('/me', { name }, 'PATCH');
+  if (register) {
+    const reg = await call('/auth/register', { name, email: `${randomUUID()}@example.test`, password: 'a-long-test-password' });
+    assert.equal(reg.status, 201);
+  } else {
+    await call('/me', { name }, 'PATCH');
+  }
   return { call, get cookie() { return cookie; }, user: initial.body.user };
 }
 

@@ -12,6 +12,7 @@ import {seats} from './room-game.js';
 import {liveState} from './wire.js';
 import {createActionGate} from './action-gate.js';
 import { credentials, createGuest, hashPassword, verifyPassword, sessionFor, issueSession, cookieOptions, userView, validName } from './auth.js';
+import { createOAuthService } from './oauth.js';
 
 export async function createApplication(options = {}) {
   const db = options.db || await openDatabase(options.database);
@@ -19,6 +20,7 @@ export async function createApplication(options = {}) {
   const allowedOrigins = (options.origins || process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5173,http://localhost:5173').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
   const secureCookies = options.secureCookies ?? (process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production');
   const allowedOrigin = origin => !origin || allowedOrigins.includes(origin);
+  const oauth = createOAuthService({ db, allowedOrigins, secureCookies, ...(options.oauth || {}) });
   // Reconnect resynchronizes from SQL. Avoid retaining every room packet in RAM.
   const io = new Server(server, { maxHttpBufferSize: 16384, perMessageDeflate:false,cors: { origin: (origin, done) => done(null, allowedOrigin(origin)), credentials: true }, allowRequest: (req, done) => done(null, allowedOrigin(req.headers.origin)) });
   const online = id => (io.sockets.adapter.rooms.get(`player:${id}`)?.size || 0) > 0;
@@ -67,13 +69,22 @@ export async function createApplication(options = {}) {
   const required = async (req, _res, next) => {
     try { req.user = await sessionFor(db, req); if (!req.user) throw new GameError('Phiên đã hết hạn. Vui lòng tải lại trang hoặc đăng nhập.', 401); next(); } catch (e) { next(e); }
   };
+  const requireAccount = (req, _res, next) => {
+    if (!req.user?.account_id) return next(new GameError('Bạn cần đăng nhập tài khoản (Email, Google hoặc Facebook) mới được tạo phòng.', 403));
+    next();
+  };
   const disconnectSession = hash => { if (hash) io.in(`session:${hash}`).disconnectSockets(true); };
   app.get('/api/health', (_req, res) => res.json({ ok: true, database: db.kind }));
   app.get('/api/ready',async(_req,res)=>{try{await db.query('SELECT 1');res.json({ok:true});}catch{res.status(503).json({ok:false});}});
+  app.get('/api/auth/providers', (_req, res) => res.json({ providers: oauth.providers() }));
+  app.get('/api/auth/google', (req, res, next) => { oauth.start('google', req, res).catch(next); });
+  app.get('/api/auth/google/callback', (req, res, next) => { oauth.callback('google', req, res, disconnectSession).catch(next); });
+  app.get('/api/auth/facebook', (req, res, next) => { oauth.start('facebook', req, res).catch(next); });
+  app.get('/api/auth/facebook/callback', (req, res, next) => { oauth.callback('facebook', req, res, disconnectSession).catch(next); });
   app.get('/api/me', rate('session', 60, 60000), async (req, res) => {
     let user = await sessionFor(db, req);
     if (!user) { user = await createGuest(db); await issueSession(db, res, user.id, null, secureCookies); }
-    res.json({ user: userView(user) });
+    res.json({ user: userView(user), providers: oauth.providers() });
   });
   app.patch('/api/me', required, rate('profile', 20, 60000), async (req, res) => {
     const name = validName(req.body.name);
@@ -118,7 +129,7 @@ export async function createApplication(options = {}) {
     res.json({ ok: true });
   });
   app.get('/api/rooms', required, async (req, res) => res.json({ rooms: await rooms.mine(req.user.id,req.query.summary==='1') }));
-  app.post('/api/rooms', required, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity)));
+  app.post('/api/rooms', required, requireAccount, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity)));
   app.get('/api/rooms/:id', required, async (req, res) => res.json({ room: await rooms.get(req.params.id, req.user.id) }));
   app.post('/api/rooms/:id/join', required, rate('join', 40, 60000), async (req, res) => res.json({ room: await rooms.join(req.params.id, req.user, req.body.token) }));
   app.post('/api/rooms/:id/invite', required, rate('invite', 15, 60000), async (req, res) => res.json(await rooms.invite(req.params.id, req.user.id)));
