@@ -1095,6 +1095,12 @@ export function chooseGrid(game) {
 }
 
 export function chooseBotMove(game) {
+  if(game.bot){
+    // Elo labels start as estimates. Higher profiles make fewer random errors;
+    // the existing difficulty also increases search strength and time budget.
+    const errorRate=.85*Math.max(0,(2200-game.bot.elo)/1800)**2;
+    if(Math.random()<errorRate){const moves=legalMoves(game);if(moves.length)return moves[Math.floor(Math.random()*moves.length)];}
+  }
   if(game.kind==='commander')return chooseCommander(game);
   if(ABSTRACT_KINDS.includes(game.kind))return chooseAbstract(game);
   return PARTY_KINDS.includes(game.kind)

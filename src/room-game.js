@@ -57,8 +57,9 @@ export function applyAction(room,actor,action,data,now,nextGameId){
 export function publicRoom(room,actor,now,online,summary=false){
   const me=seatOf(room,actor),kind=room.kind||'caro',seat=s=>({name:s.name,mark:s.mark,ready:s.ready,rematch:s.rematch,online:online?.(s.id)||false});
   const view=room.players?{id:room.id,version:room.version,duration:room.duration,createdAt:room.createdAt,inviteExpiresAt:room.inviteExpiresAt,owner:seat(room.owner),guest:room.guest?seat(room.guest):null,players:room.players.map(seat),capacity:room.capacity,me:{role:room.owner.id===actor?'owner':'guest',mark:me.mark,ready:me.ready,rematch:me.rematch},drawOffer:null,serverNow:now}:caro.publicRoom(room,actor,now,online);
+  view.ranked=!!room.ranked;
   if(summary)return {...view,kind,summary:true,game:room.game};
-  if(kind==='caro')return {...view,kind};
+  if(kind==='caro')return {...view,kind,game:{...view.game,ratingChanges:room.game.ratingChanges}};
   const {repetitions,seenPositions,humanSide,difficulty,...game}=room.game;
   return {...view,kind,game:{...game,legal:game.phase==='playing'&&game.turn===view.me.mark?legalMoves(room.game):[]}};
 }

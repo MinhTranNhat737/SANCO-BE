@@ -86,3 +86,13 @@ Trò xúc xắc gửi action=move và command=roll|move|buy|build|sell|end|bankr
 room-action / practice-action nhận {id,body}, trả ack {room|game} hoặc {error,status}. Cùng pipeline giao dịch/idempotency với HTTP. Live state gửi movesAppend + moveCount, không gửi toàn replay; GET/watch-room ack trả snapshot đầy đủ. Client phải resync khi thiếu index hoặc reconnect. Phiên và quyền được kiểm tra cả qua socket; người ngoài không nhận trạng thái phòng.
 
 GET /api/ready kiểm tra database. SERVE_FRONTEND=true phục vụ fe/dist cùng origin. Production bắt buộc DATABASE_URL. Xem [hướng dẫn Docker/Nginx và giới hạn một replica](../deploy/README.md). npm run bench đo 80 ack sau SQL trên loopback/PGlite; không phải kết quả internet.
+
+## Elo, rank và bot
+
+Migration `010_ratings.sql` tự áp dụng khi khởi động. Mỗi người có Elo riêng cho từng `kind`, khởi đầu 1.000; 10 ván đầu phân hạng dùng K=40, sau đó K=24. Các bậc Đồng / Bạc / Vàng / Bạch kim / Kim cương / Cao thủ / Đại cao thủ bắt đầu tại 0 / 800 / 1.100 / 1.400 / 1.700 / 2.000 / 2.300 Elo. Hết phân hạng mới xuất hiện trên bảng xếp hạng.
+
+`GET /api/ratings`, `/api/leaderboard/:kind`, `/api/bots/:kind` yêu cầu phiên hợp lệ. Tạo phòng hỗ trợ `ranked` (mặc định true cho phòng mới); phòng cũ không đổi điểm. Tạo practice với `{kind,ranked:true,botId?}` để đấu rank, bỏ `botId` để chọn trong ba bot gần Elo nhất. Mỗi môn có 12 hồ sơ bot riêng (400–2.050 Elo), phân biệt bằng độ khó và tần suất sai sót; Elo bot là ước lượng nội bộ, chưa hiệu chỉnh qua thi đấu thực tế. Không tạo tài khoản giả hoặc đưa bot vào bảng người chơi.
+
+Kết quả và điểm được ghi cùng giao dịch, khóa theo người/môn và chống lặp theo ID ván. Ván 3–4 người so cặp rồi lấy trung bình: người thắng thắng mọi cặp, các bên còn lại hòa nhau. Ván bot rank không được undo, một người chỉ có một ván rank đang chơi ở mỗi môn, tạo lại sẽ tiếp tục ván cũ. Không hoạt động quá 5 phút nhận thua trước khi xóa bàn; điểm vẫn còn trong SQL. Phòng rank đang chơi giữ lại đến khi đồng hồ phân xử, không xóa do bộ dọn phòng.
+
+Bot dùng hàng đợi và worker thread có giới hạn; `BOT_WORKERS=1..16` để cấu hình tải CPU (mặc định số lõi khả dụng trừ một, tối đa 4). Mọi ván dùng trạng thái độc lập, hồ sơ bot có thể phục vụ nhiều người. Việc này không thay thế giới hạn triển khai một replica nêu trong hướng dẫn deploy.

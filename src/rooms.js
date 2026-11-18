@@ -2,6 +2,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { GameError, newGame, other, applyAction, settleTimeout, seatOf, publicRoom, KINDS, boardSide, seats } from './room-game.js';
 import {PARTY_KINDS,PARTY_SIDES} from './party-games.js';
 import { digest, secret } from './auth.js';
+import {settleRating} from './ratings.js';
 
 export const ROOM_INACTIVITY_MS = 5 * 60 * 1000;
 
@@ -38,6 +39,9 @@ export class RoomService {
       const { rows } = await client.query('SELECT state, updated_at FROM rooms WHERE id = $1 FOR UPDATE', [id]);
       if (!rows[0] || Number(rows[0].updated_at) > cutoff) return null;
       const room = rows[0].state;
+      // Ranked clocks decide forfeits. Deleting a live ranked table would let a
+      // losing player escape their result by leaving before the clock runs out.
+      if(room.ranked&&room.game.phase==='playing')return null;
       const memberIds = [...new Set([room.owner?.id, room.guest?.id, ...seats(room).map(s => s.id)].filter(Boolean))];
       clearTimeout(this.timers.get(id));
       this.timers.delete(id);
@@ -50,6 +54,8 @@ export class RoomService {
   async ensureActive(id) {
     if (this.closed || this.inactivityMs <= 0) return;
     const cutoff = Date.now() - this.inactivityMs;
+    const current=await this.read(id);
+    if(current.ranked&&current.game.phase==='playing')return;
     const deleted = await this.cancelInactiveRoom(id, cutoff);
     if (deleted) {
       await this.scheduleSweep();
@@ -59,7 +65,7 @@ export class RoomService {
   async pruneInactive(now = Date.now()) {
     if (this.closed || this.inactivityMs <= 0) return [];
     const cutoff = now - this.inactivityMs;
-    const { rows } = await this.db.query('SELECT id FROM rooms WHERE updated_at <= $1', [cutoff]);
+    const { rows } = await this.db.query("SELECT id FROM rooms WHERE updated_at <= $1 AND NOT (COALESCE(state->>'ranked','false')='true' AND state->'game'->>'phase'='playing')", [cutoff]);
     const removed = [];
     for (const row of rows) {
       const out = await this.cancelInactiveRoom(row.id, cutoff);
@@ -73,7 +79,7 @@ export class RoomService {
     this.sweepTimer = null;
     if (this.closed || this.inactivityMs <= 0) return;
     try {
-      const { rows } = await this.db.query('SELECT MIN(updated_at) AS oldest FROM rooms');
+      const { rows } = await this.db.query("SELECT MIN(updated_at) AS oldest FROM rooms WHERE NOT (COALESCE(state->>'ranked','false')='true' AND state->'game'->>'phase'='playing')");
       if (this.closed || !rows[0]?.oldest) return;
       const delay = Math.max(10, Number(rows[0].oldest) + this.inactivityMs - Date.now());
       this.sweepTimer = setTimeout(() => { this.pruneInactive().catch(error => console.error('Room inactivity sweep failed:', error.message)); }, Math.min(delay, 2147483647));
@@ -84,6 +90,10 @@ export class RoomService {
   }
   async persist(client, room) {
     const now = Date.now();
+    if(room.ranked&&room.game.phase==='finished'&&room.guest){
+      room.game.ratingChanges=await settleRating(client,{id:room.game.id,kind:room.kind||'caro',source:'room',winner:room.game.result.winner,
+        participants:seats(room).map(s=>({id:s.id,mark:s.mark}))});
+    }
     room.version += 1;
     room.updatedAt = now;
     await client.query('UPDATE rooms SET state=$1, version=$2, guest_id=$3, updated_at=$4 WHERE id=$5', [JSON.stringify(room), room.version, room.guest?.id || null, now, room.id]);
@@ -114,7 +124,8 @@ export class RoomService {
     if (changed) this.changed(room); else this.schedule(room);
     return room;
   }
-  async create(user, minutes, kind='caro', side='random', capacity=2) {
+  async create(user, minutes, kind='caro', side='random', capacity=2, ranked=true) {
+    if(typeof ranked!=='boolean')throw new GameError('Chế độ xếp hạng không hợp lệ.');
     if(!KINDS.includes(kind))throw new GameError('Môn cờ không hợp lệ.');
     if(!['first','second','random'].includes(side))throw new GameError('Bên quân không hợp lệ.');
     if(!Number.isInteger(capacity)||capacity<2||capacity>(PARTY_KINDS.includes(kind)?4:2))throw new GameError('Số người không hợp lệ.');
@@ -125,7 +136,7 @@ export class RoomService {
     const token = secret(), now = Date.now(), mark = boardSide(kind,side==='random'?!!(randomBytes(1)[0]%2):side==='first');
     for (let attempt = 0; attempt < 3; attempt++) {
       const id = randomBytes(4).toString('hex').toUpperCase();
-      const room = { id, kind, version: 0, duration: minutes * 60000, createdAt: now, updatedAt: now,
+      const room = { id, kind, ranked, version: 0, duration: minutes * 60000, createdAt: now, updatedAt: now,
         owner: { id: user.id, name: user.display_name, mark, ready: false, rematch: false }, guest: null,
         inviteHash: digest(token), inviteExpiresAt: now + 86400000, drawOffer: null, game: newGame(minutes * 60000, randomUUID(),kind,capacity) };
       if(PARTY_KINDS.includes(kind)){room.capacity=capacity;room.players=[room.owner];}

@@ -13,6 +13,7 @@ import {liveState} from './wire.js';
 import {createActionGate} from './action-gate.js';
 import { credentials, createGuest, hashPassword, verifyPassword, sessionFor, issueSession, cookieOptions, userView, validName } from './auth.js';
 import { createOAuthService } from './oauth.js';
+import {playerRatings,leaderboard,botRoster,RANKS,INITIAL_ELO,PLACEMENT_GAMES} from './ratings.js';
 
 export async function createApplication(options = {}) {
   const db = options.db || await openDatabase(options.database);
@@ -37,8 +38,8 @@ export async function createApplication(options = {}) {
   });
   const practice = new PracticeService(db, (game, actor) => io.to(`player:${actor}`).emit('practice', liveState(game)), {
     inactivityMs,
-    onDelete(id, playerId) {
-      if (online(playerId)) io.to(`player:${playerId}`).emit('practice-closed', { id, reason: 'inactive', message: 'Bàn đã bị hủy và xóa do không hoạt động quá 5 phút.' });
+    onDelete(id, playerId, ranked) {
+      if (online(playerId)) io.to(`player:${playerId}`).emit('practice-closed', { id, reason: 'inactive', message: ranked?'Ván rank không hoạt động quá 5 phút: bạn nhận thua và đã cập nhật Elo.':'Bàn đã bị hủy và xóa do không hoạt động quá 5 phút.' });
     }
   });
   const dummyHash = await hashPassword('timing-only-password-no-account');
@@ -129,7 +130,10 @@ export async function createApplication(options = {}) {
     res.json({ ok: true });
   });
   app.get('/api/rooms', required, async (req, res) => res.json({ rooms: await rooms.mine(req.user.id,req.query.summary==='1') }));
-  app.post('/api/rooms', required, requireAccount, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity)));
+  app.get('/api/ratings',required,async(req,res)=>res.json({ratings:await playerRatings(db,req.user.id),ranks:RANKS,initialElo:INITIAL_ELO,placementGames:PLACEMENT_GAMES}));
+  app.get('/api/leaderboard/:kind',required,async(req,res)=>res.json({players:await leaderboard(db,req.params.kind)}));
+  app.get('/api/bots/:kind',required,async(req,res)=>res.json({bots:botRoster(req.params.kind)}));
+  app.post('/api/rooms', required, requireAccount, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity,req.body.ranked)));
   app.get('/api/rooms/:id', required, async (req, res) => res.json({ room: await rooms.get(req.params.id, req.user.id) }));
   app.post('/api/rooms/:id/join', required, rate('join', 40, 60000), async (req, res) => res.json({ room: await rooms.join(req.params.id, req.user, req.body.token) }));
   app.post('/api/rooms/:id/invite', required, rate('invite', 15, 60000), async (req, res) => res.json(await rooms.invite(req.params.id, req.user.id)));
@@ -149,8 +153,26 @@ export async function createApplication(options = {}) {
   });
   if(options.staticDirectory||process.env.SERVE_FRONTEND==='true'){
     const directory=options.staticDirectory||fileURLToPath(new URL('../../fe/dist/',import.meta.url));
-    app.use(express.static(directory,{index:false,maxAge:'1h',setHeaders(res,file){res.setHeader('Cache-Control',file.includes(`${path.sep}assets${path.sep}`)?'public, max-age=31536000, immutable':'no-cache');}}));
-    app.get('/{*path}',(req,res,next)=>req.path.startsWith('/api/')?next():res.sendFile(path.join(directory,'index.html'),{headers:{'Cache-Control':'no-cache'}}));
+    const nonPublicQueries=['room','replay','practice','game','auth','auth_error'];
+    app.get('/',(req,res,next)=>{
+      if(nonPublicQueries.some(key=>Object.hasOwn(req.query,key)))res.set('X-Robots-Tag','noindex');
+      next();
+    });
+    app.get('/index.html',(req,res)=>res.redirect(308,`/${req.originalUrl.slice(req.path.length)}`));
+    app.get('/choi/:page.html',(req,res)=>res.redirect(308,`/choi/${encodeURIComponent(req.params.page)}`));
+    app.get('/choi/:page',(req,res,next)=>{
+      if(!req.path.endsWith('/'))return next();
+      const query=req.originalUrl.slice(req.path.length);
+      res.redirect(308,`/choi/${encodeURIComponent(req.params.page)}${query}`);
+    });
+    app.use(express.static(directory,{extensions:['html'],maxAge:'1h',setHeaders(res,file){
+      const asset=file.includes(`${path.sep}assets${path.sep}`);
+      res.setHeader('Cache-Control',asset?'public, max-age=31536000, immutable':file.endsWith('.html')?'no-cache':'public, max-age=3600');
+    }}));
+    app.get('/{*path}',(req,res,next)=>{
+      if(/^\/(api|socket\.io)(\/|$)/.test(req.path))return next();
+      res.status(404).sendFile(path.join(directory,'404.html'),error=>{if(error&&!res.headersSent)next();});
+    });
   }
   app.use((_req, _res, next) => next(new GameError('Không tìm thấy API.', 404)));
   app.use((error, _req, res, _next) => {
