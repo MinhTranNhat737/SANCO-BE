@@ -32,6 +32,10 @@ ném bom là những lựa chọn tách biệt, không suy diễn từ ô đích
   lưng có thể tách ra bằng tầm đi riêng tính từ giao điểm chung. Phối hợp
   tối đa ba lệnh từ một tổ hợp, đích khác nhau; quân chưa tách đi cùng quân
   chở. Không phối hợp vừa dời quân chở vừa cho khách bắn/ném bom trở về.
+- Xe tăng và máy bay có thể tới đón quân phù hợp trong một lượt. Máy bay có
+  thể rời một tàu để sang tàu bạn, có hoặc không mang theo quân đang chở.
+  Tư lệnh muốn đổi tàu phải đi cùng máy bay. Nếu tàu cơ động trước và máy
+  bay cất cánh từ vị trí mới thì thực hiện ở hai lượt khác nhau.
 - Vùng phòng không tính theo khoảng cách Euclid giữa các giao điểm. Nếu
   đường bay chạm vùng không bảo vệ mục tiêu, máy bay cháy trước khi đánh.
   Đánh mục tiêu trong vùng bảo vệ thì một đổi một. Máy bay anh hùng miễn

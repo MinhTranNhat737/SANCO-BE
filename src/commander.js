@@ -51,6 +51,10 @@ function canCarry(carrier,passengers,index){
   const allowed=t==='T'?['K','I','D']:t==='F'?['K','I','D','T']:t==='N'?['K','I','D','T','F']:[];
   return passengers.length<=2&&passengers.every(p=>allowed.includes(type(p)));
 }
+function transferPassenger(units,slot,from){
+  if(type(units[0])!=='N'||type(units[slot])!=='F')return -1;
+  return units.findIndex((unit,index)=>index>0&&index!==slot&&canCarry(units[slot],[unit],from));
+}
 function airZones(board,enemy){
   return board.flatMap((cell,index)=>ctlUnits(cell).filter(u=>u[0]===enemy&&['A','M','N'].includes(type(u))).map(u=>({index,radius:(type(u)==='M'?2:1)+(hero(u)?1:0)})));
 }
@@ -81,10 +85,23 @@ function rawMoves(board,side,original=false){
         const shipArtillery=t==='N'&&capture&&type(target[0])!=='N'&&!target.some(u=>type(u)==='F');
         if(!(original&&shipArtillery)&&blocked(board,path,unit,from,capture,original))continue;
         // A carrier's base moves the entire stack. Passengers may disembark separately.
-        const cargo=unitIndex===0?units.slice(1):[],movers=[unit,...cargo];
+        const cargo=unitIndex===0?units.slice(1):[];
         if(friendly){
-          const incoming=unitIndex===0?units:[unit];
-          if(canCarry(target[0],[...target.slice(1),...incoming],to)&&(!['N','H'].includes(type(target[0]))||land(from))&&!(t==='N'))moves.push({from,to,action:`ctl-${unitIndex}-board`});
+          const carrier=target[0],carrierType=type(carrier),incoming=[unit,...cargo];
+          const canApproach=land(from)||original&&t==='F'&&carrierType==='N';
+          const commanderAtSea=original&&t==='K'&&type(units[0])==='N'&&carrierType==='N';
+          if(t!=='N'&&!commanderAtSea&&(!['N','H'].includes(carrierType)||canApproach)&&canCarry(carrier,[...target.slice(1),...incoming],to)){
+            moves.push({from,to,action:`ctl-${unitIndex}-board`});
+          }
+          if(original&&carrierType==='N'){
+            const passenger=transferPassenger(units,unitIndex,from);
+            if(passenger>=0&&canCarry(carrier,[...target.slice(1),unit,units[passenger]],to)){
+              moves.push({from,to,action:`ctl-${unitIndex}-transfer`});
+            }
+          }
+          if(original&&['T','F'].includes(t)&&target.length===1&&canCarry(unit,[...cargo,carrier],to)&&(t==='F'||path.every(land))){
+            moves.push({from,to,action:`ctl-${unitIndex}-pickup`});
+          }
           continue;
         }
         if(t==='N'){
@@ -110,7 +127,7 @@ function rawMoves(board,side,original=false){
           if(capture&&!target.some(u=>type(u)==='F'))moves.push({from,to,action:`ctl-${unitIndex}-bomb`});
           if(!land(to))continue;
         }
-        if(movers.length&&(!capture||target[0][0]!==side))moves.push({from,to,action:`ctl-${unitIndex}-move`});
+        moves.push({from,to,action:`ctl-${unitIndex}-move`});
       }
     });
   }
@@ -127,7 +144,7 @@ export function commanderThreats(board,side,original=false){
   const king=commanderAt(board,side);if(king<0)return [];
   const zones=original?airZones(board,side):[];
   return rawMoves(board,other(side),original).filter(m=>{
-    if(m.to!==king||m.action.endsWith('-board'))return false;
+    if(m.to!==king)return false;
     const attacker=ctlUnits(board[m.from])[Number(m.action.split('-')[1])];
     return !original||type(attacker)!=='F'||hero(attacker)||!aircraftStrike(m.from,king,true,zones).burnt;
   });
@@ -142,7 +159,7 @@ export function commanderLegal(game){
     return path.every(to=>{const b=[...game.board];b[move.from]=pack(ctlUnits(b[move.from]).filter(u=>u!==unit));if(ctlUnits(b[move.to]).some(u=>type(u)==='K'))b[move.to]=null;b[to]=unit;return commanderThreats(b,game.turn).length===0;});
   });
 }
-function decode(move){const m=/^ctl-([0-2])-(move|bomb|fire|board)$/.exec(move.action||'');return m?{unit:+m[1],mode:m[2],to:move.to}:null;}
+function decode(move){const m=/^ctl-([0-2])-(move|bomb|fire|board|transfer|pickup)$/.exec(move.action||'');return m?{unit:+m[1],mode:m[2],to:move.to}:null;}
 function promoteLast(board){
   for(const side of['r','b']){
     const troops=[];board.forEach((cell,index)=>ctlUnits(cell).forEach((unit,slot)=>{if(unit[0]===side&&!['K','H'].includes(type(unit)))troops.push({index,slot,unit});}));
@@ -165,15 +182,21 @@ export function commanderMove(game,request){
   const original=game.board,units=ctlUnits(original[from]),side=game.turn,enemy=other(side);
   if(!units.length||units[0][0]!==side)return null;
   const next=[...original],zones=airZones(original,enemy),deploying=new Set(orders.map(o=>o.unit)),captures=[],destroyed=[],effects=[];
-  const standing=units.filter((_,i)=>!deploying.has(i));
+  const transfers=new Map();
+  for(const order of orders.filter(o=>o.mode==='transfer')){
+    const passenger=transferPassenger(units,order.unit,from);
+    if(passenger<0||deploying.has(passenger))return null;
+    transfers.set(order.unit,passenger);deploying.add(passenger);
+  }
   // An unmoved passenger rides with the base; a bomber/fire action keeps its stack at origin.
-  const baseOrder=orders.find(o=>o.unit===0),baseLeaves=baseOrder&&['move','board'].includes(baseOrder.mode);
+  const baseOrder=orders.find(o=>o.unit===0),baseLeaves=baseOrder&&['move','board','pickup'].includes(baseOrder.mode);
   if(baseLeaves&&orders.some(o=>o.unit!==0&&['bomb','fire'].includes(o.mode)))return null;
-  next[from]=baseLeaves?null:pack(standing);
+  next[from]=baseLeaves?null:pack(units.filter((_,i)=>!deploying.has(i)));
   let points=0,enemyPoints=0;
   for(const order of orders){
     const {unit:slot,to:dest,mode}=order,unit=units[slot],t=type(unit);
-    const carried=slot===0?units.filter((_,i)=>i>0&&!deploying.has(i)):[],moving=[unit,...carried];
+    const carried=slot===0?units.filter((_,i)=>i>0&&!deploying.has(i)):transfers.has(slot)?[units[transfers.get(slot)]]:[];
+    const moving=[unit,...carried];
     const target=ctlUnits(original[dest]),capture=target.length&&target[0][0]===enemy;
     let burnt=false,exchange=false;
     if(t==='F'&&!hero(unit)){
@@ -188,10 +211,13 @@ export function commanderMove(game,request){
     }
     if(mode==='bomb'||mode==='fire'){
       // Reconstruct the returning unit in its original order below.
-    }else if(mode==='board'){
+    }else if(mode==='board'||mode==='transfer'){
       const destination=ctlUnits(next[dest]);
       if(!destination.length||!canCarry(destination[0],[...destination.slice(1),...moving],dest))return null;
       next[dest]=pack([...destination,...moving]);
+    }else if(mode==='pickup'){
+      if(!canCarry(unit,[...carried,...target],dest))return null;
+      next[dest]=pack([...moving,...target]);
     }else{
       if(next[dest]&&ctlUnits(next[dest])[0][0]===side)return null;
       next[dest]=pack(moving);
@@ -202,8 +228,9 @@ export function commanderMove(game,request){
     // Keep original stack order for units that did not leave or survived a ranged attack.
     const baseBurnt=effects.some(e=>e.unit===units[0]&&e.burnt&&baseOrder?.to===e.to);
     next[from]=pack(units.filter((unit,i)=>{
-      if(i>0&&!deploying.has(i)&&baseBurnt)return false;
-      const order=orders.find(o=>o.unit===i);return !order||['bomb','fire'].includes(order.mode)&&!effects.find(e=>e.unit===unit&&e.to===order.to)?.burnt;
+      const order=orders.find(o=>o.unit===i);
+      if(!order)return !deploying.has(i)&&!baseBurnt;
+      return ['bomb','fire'].includes(order.mode)&&!effects.find(e=>e.unit===unit&&e.to===order.to)?.burnt;
     }));
   }
   const oldKing=commanderAt(original,side),newKing=commanderAt(next,side);
@@ -223,7 +250,7 @@ export function commanderMove(game,request){
   if(originalRules&&result?.winner)game.commander.scores[result.winner]+=100;
   if(!originalRules&&!result&&game.noCapture>=120)result={winner:null,reason:'no-capture',line:[]};
   if(!originalRules&&!result&&!commanderLegal(game).length)result={winner:side,reason:'no-moves',line:[]};
-  const verbs={move:'→',board:'lên',bomb:'ném bom',fire:'bắn'};
+  const verbs={move:'→',board:'lên',bomb:'ném bom',fire:'bắn',transfer:'chuyển tàu cùng quân chở',pickup:'đến đón'};
   return {result,captures,destroyed,effects,label:orders.map(o=>{
     const unit=units[o.unit];
     const symbol=originalRules?notation[type(unit)]+(hero(unit)?'*':''):unit;

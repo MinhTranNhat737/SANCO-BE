@@ -87,6 +87,43 @@ test('Combined orders deploy units in distinct directions atomically, and forged
   const forged=structuredClone(g);assert.throws(()=>makePracticeMove(g,{from:-1,to:999,action:'ctl-0-move'}));assert.deepEqual(g,forged);
 });
 
+test('Aircraft can change carriers alone or with a passenger; a commander cannot walk from ship to ship',()=>{
+  const g=position([...kings,[8,1,'rN+rF+rI'],[9,0,'rN'],[8,2,'bN']]);
+  const solo=move([8,1],[9,0],1,'board'),transfer=move([8,1],[9,0],1,'transfer');
+  assert.ok(has(g,solo)&&has(g,transfer));
+  const original=structuredClone(g);
+  const fire=move([8,1],[8,2],2,'fire');assert.ok(has(g,fire));
+  assert.equal(commanderMove(g,{...transfer,action:'ctl-combined',details:{orders:[{unit:1,to:transfer.to,mode:'transfer'},{unit:2,to:fire.to,mode:'fire'}]}}),null);
+  assert.deepEqual(g,original);
+  const single=structuredClone(g);makePracticeMove(single,solo);
+  assert.equal(single.board[solo.from],'rN+rI');assert.equal(single.board[solo.to],'rN+rF');
+  makePracticeMove(g,transfer);
+  assert.equal(g.board[transfer.from],'rN');assert.equal(g.board[transfer.to],'rN+rF+rI');
+  assert.equal(g.moves.length,1);assert.equal(g.turn,'b');
+  const full=position([...kings,[8,1,'rN+rF+rI'],[9,0,'rN+rD']]);
+  assert.ok(has(full,solo)&&!has(full,transfer));
+  const general=position([[8,2,'rN+rK'],[9,2,'rN'],[11,9,'bK']]);
+  assert.ok(!has(general,move([8,2],[9,2],1,'board')));
+  const intercepted=position([...kings,[8,1,'rN+rF+rI'],[9,0,'rN'],[10,0,'bN'],[10,5,'bT']]);
+  makePracticeMove(intercepted,transfer);
+  assert.equal(intercepted.board[transfer.from],'rN');assert.equal(intercepted.board[transfer.to],'rN');
+  assert.equal(intercepted.commander.scores.b,50);
+});
+
+test('Tanks and aircraft can pick up eligible friendly units within their movement range',()=>{
+  const land=position([...kings,[3,4,'rT'],[3,6,'rI'],[4,4,'rE'],[7,5,'bT']]);
+  const pickup=move([3,4],[3,6],0,'pickup');
+  assert.ok(has(land,pickup));
+  land.board[at(3,5)]='bD';assert.ok(!has(land,pickup));land.board[at(3,5)]=null;
+  assert.ok(!has(land,move([3,4],[4,4],0,'pickup')));
+  makePracticeMove(land,pickup);assert.equal(land.board[pickup.from],null);assert.equal(land.board[pickup.to],'rT+rI');
+  assert.deepEqual(land.commander.scores,{r:0,b:0});
+  const air=position([...kings,[3,4,'rF'],[3,5,'bT'],[3,8,'rD']]);
+  const rendezvous=move([3,4],[3,8],0,'pickup');
+  assert.ok(has(air,rendezvous));makePracticeMove(air,rendezvous);
+  assert.equal(air.board[rendezvous.to],'rF+rD');assert.equal(air.board[at(3,5)],'bT*');
+});
+
 test('Hero award follows a commander escape; last guard and stealth use their extended movement',()=>{
   const g=position([[0,10,'rK'],[7,5,'bK'],[3,5,'rP'],[2,8,'rI'],[10,3,'bI'],[10,4,'bT']]);
   makePracticeMove(g,move([3,5],[4,5]));assert.equal(g.check,true);assert.equal(g.board[at(4,5)],'rP');
