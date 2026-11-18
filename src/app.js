@@ -13,7 +13,8 @@ import {liveState} from './wire.js';
 import {createActionGate} from './action-gate.js';
 import { credentials, createGuest, hashPassword, verifyPassword, sessionFor, issueSession, cookieOptions, userView, validName } from './auth.js';
 import { createOAuthService } from './oauth.js';
-import {playerRatings,leaderboard,botRoster,RANKS,INITIAL_ELO,PLACEMENT_GAMES} from './ratings.js';
+import {playerRatings,leaderboard,myLeaderboardPosition,botRoster,RANKS,INITIAL_ELO,PLACEMENT_GAMES} from './ratings.js';
+import {Matchmaking,matchPresets} from './matchmaking.js';
 
 export async function createApplication(options = {}) {
   const db = options.db || await openDatabase(options.database);
@@ -43,9 +44,10 @@ export async function createApplication(options = {}) {
     }
   });
   const dummyHash = await hashPassword('timing-only-password-no-account');
+  const matchmaking=new Matchmaking(db,rooms);
   const actionGate=createActionGate();
   const limits = new Map();
-  const cleanup = setInterval(() => { const now = Date.now(); for (const [key, value] of limits) if (value.until < now) limits.delete(key); db.query('DELETE FROM sessions WHERE expires_at < $1', [now]).catch(() => {}); }, 60000);
+  const cleanup = setInterval(() => { const now = Date.now(); for (const [key, value] of limits) if (value.until < now) limits.delete(key); db.query('DELETE FROM sessions WHERE expires_at < $1', [now]).catch(() => {}); db.query('DELETE FROM rank_queue WHERE expires_at < $1 AND room_id IS NULL',[now-60_000]).catch(()=>{}); }, 60000);
   cleanup.unref();
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY === '1' || process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
@@ -130,8 +132,17 @@ export async function createApplication(options = {}) {
     res.json({ ok: true });
   });
   app.get('/api/rooms', required, async (req, res) => res.json({ rooms: await rooms.mine(req.user.id,req.query.summary==='1') }));
-  app.get('/api/ratings',required,async(req,res)=>res.json({ratings:await playerRatings(db,req.user.id),ranks:RANKS,initialElo:INITIAL_ELO,placementGames:PLACEMENT_GAMES}));
-  app.get('/api/leaderboard/:kind',required,async(req,res)=>res.json({players:await leaderboard(db,req.params.kind)}));
+  app.get('/api/ratings',required,async(req,res)=>res.json({ratings:await playerRatings(db,req.user.id,req.query.pool??'overall'),ranks:RANKS,initialElo:INITIAL_ELO,placementGames:PLACEMENT_GAMES}));
+  app.get('/api/leaderboard/:kind',required,async(req,res)=>{
+    const kind=req.params.kind,pool=req.query.pool??'overall';
+    const [players,me]=await Promise.all([leaderboard(db,kind,pool,req.user.id),myLeaderboardPosition(db,req.user.id,kind,pool)]);
+    res.json({players,me});
+  });
+  app.get('/api/matchmaking',required,async(req,res)=>res.json({presets:matchPresets,ticket:await matchmaking.status(req.user.id)}));
+  app.post('/api/matchmaking',required,rate('matchmaking',240,60000),async(req,res)=>{
+    const {action,kind,preset}=req.body??{};
+    res.json({ticket:await matchmaking.update(req.user,action,action==='search'?{kind,preset}:undefined)});
+  });
   app.get('/api/bots/:kind',required,async(req,res)=>res.json({bots:botRoster(req.params.kind)}));
   app.post('/api/rooms', required, requireAccount, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity,req.body.ranked)));
   app.get('/api/rooms/:id', required, async (req, res) => res.json({ room: await rooms.get(req.params.id, req.user.id) }));

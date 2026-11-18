@@ -91,7 +91,11 @@ GET /api/ready kiểm tra database. SERVE_FRONTEND=true phục vụ fe/dist cùn
 
 Migration `010_ratings.sql` tự áp dụng khi khởi động. Mỗi người có Elo riêng cho từng `kind`, khởi đầu 1.000; 10 ván đầu phân hạng dùng K=40, sau đó K=24. Các bậc Đồng / Bạc / Vàng / Bạch kim / Kim cương / Cao thủ / Đại cao thủ bắt đầu tại 0 / 800 / 1.100 / 1.400 / 1.700 / 2.000 / 2.300 Elo. Hết phân hạng mới xuất hiện trên bảng xếp hạng.
 
-`GET /api/ratings`, `/api/leaderboard/:kind`, `/api/bots/:kind` yêu cầu phiên hợp lệ. Tạo phòng hỗ trợ `ranked` (mặc định true cho phòng mới); phòng cũ không đổi điểm. Tạo practice với `{kind,ranked:true,botId?}` để đấu rank, bỏ `botId` để chọn trong ba bot gần Elo nhất. Mỗi môn có 12 hồ sơ bot riêng (400–2.050 Elo), phân biệt bằng độ khó và tần suất sai sót; Elo bot là ước lượng nội bộ, chưa hiệu chỉnh qua thi đấu thực tế. Không tạo tài khoản giả hoặc đưa bot vào bảng người chơi.
+`GET /api/ratings`, `/api/leaderboard/:kind`, `/api/bots/:kind` yêu cầu phiên hợp lệ. Tạo phòng hỗ trợ `ranked` (mặc định true cho phòng mới). Tạo practice với `{kind,ranked:true,botId?}` để đấu rank, bỏ `botId` để chọn bot gần Elo nhất. Bot và phòng riêng bật rank tính vào bảng Elo chung. Mỗi môn có 12 hồ sơ bot (400–2.050 Elo ước lượng nội bộ).
+
+Migration `011_matchmaking.sql` giữ điểm hiện có trong `overall`, đồng thời thêm ba nhóm Elo công khai `blitz`, `rapid`, `classical` riêng từng môn. `GET /api/ratings` và `GET /api/leaderboard/:kind` nhận `?pool=...`. Bảng xếp hạng trả top 50 và hồ sơ `me` kèm vị trí cá nhân kể cả ngoài top 50.
+
+`GET /api/matchmaking` trả các mức thời gian và trạng thái hiện tại. Tài khoản đã đăng nhập dùng `POST /api/matchmaking` với `action: search|poll|cancel`; `search` cần `kind` và `preset`. Hệ thống ghép đúng môn và mức thời gian, nới khoảng cách từ ±25 đến ±200 Elo. Mỗi tài khoản có một lượt tìm hoặc ván ghép đang chạy. Yêu cầu tìm hết hạn sau 20 giây không được gia hạn. Nếu chờ từ 15 giây, giao diện cho phép đổi sang đấu bot. Ván ghép có hai người, chọn bên ngẫu nhiên và bắt đầu đồng hồ ngay khi ghép thành công.
 
 Kết quả và điểm được ghi cùng giao dịch, khóa theo người/môn và chống lặp theo ID ván. Ván 3–4 người so cặp rồi lấy trung bình: người thắng thắng mọi cặp, các bên còn lại hòa nhau. Ván bot rank không được undo, một người chỉ có một ván rank đang chơi ở mỗi môn, tạo lại sẽ tiếp tục ván cũ. Không hoạt động quá 5 phút nhận thua trước khi xóa bàn; điểm vẫn còn trong SQL. Phòng rank đang chơi giữ lại đến khi đồng hồ phân xử, không xóa do bộ dọn phòng.
 

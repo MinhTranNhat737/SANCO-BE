@@ -8,7 +8,8 @@ import {PracticeService} from '../src/practice.js';
 import {KINDS,createPractice,boardSide,legalMoves} from '../src/practice-engine.js';
 import {chooseBotMove} from '../src/bot.js';
 import {createApplication} from '../src/app.js';
-import {ratingView,eloDelta,settleRating,playerRatings,botRoster,selectBot,leaderboard} from '../src/ratings.js';
+import {ratingView,eloDelta,settleRating,playerRatings,botRoster,selectBot,leaderboard,myLeaderboardPosition} from '../src/ratings.js';
+import {Matchmaking} from '../src/matchmaking.js';
 
 let db,rooms,practice;
 before(async()=>{
@@ -18,7 +19,70 @@ before(async()=>{
 after(async()=>{rooms.close();await practice.close();await db.close();});
 const guest=()=>createGuest(db);
 const settle=(kind,participants,winner,id=randomUUID())=>db.transaction(client=>settleRating(client,{id,kind,source:'room',participants,winner}));
-const act=(room,actor,action)=>rooms.act(room.id,actor.id,{actionId:randomUUID(),version:room.version,action});
+const act=(room,actor,action,move={})=>rooms.act(room.id,actor.id,{...move,actionId:randomUUID(),version:room.version,action});
+
+test('Matchmaking only pairs the same game and exact time, creates one private-to-players room, and settles into its pool',async()=>{
+  const [a,b,c]=await Promise.all([guest(),guest(),guest()]);
+  const queue=new Matchmaking(db,rooms);
+  const join=(user,kind,preset)=>queue.update({...user,account_id:'test-account'},'search',{kind,preset});
+  await assert.rejects(queue.update(a,'search',{kind:'caro',preset:'3-2'}),error=>error.status===403);
+  await assert.rejects(join(a,'monopoly','3-2'),/Thời gian không hợp lệ/);
+  assert.equal((await join(c,'caro','3-0')).status,'searching');
+  assert.equal((await join(a,'chess','3-2')).status,'searching');
+  const responses=await Promise.all([join(a,'caro','3-2'),join(b,'caro','3-2')]);
+  const found=responses.find(v=>v.status==='matched');assert.ok(found);
+  assert.equal((await queue.status(a.id)).roomId,found.roomId);
+  assert.equal((await queue.status(b.id)).roomId,found.roomId);
+  assert.equal((await queue.status(c.id)).status,'searching');
+  assert.equal((await queue.update({...a,account_id:'test-account'},'cancel')).roomId,found.roomId);
+  assert.equal((await join(a,'chess','10-0')).roomId,found.roomId);
+  await assert.rejects(rooms.get(found.roomId,c.id),error=>error.status===403);
+
+  const room=await rooms.get(found.roomId,a.id);
+  assert.equal(room.game.phase,'playing');assert.equal(room.matchmaking.pool,'blitz');
+  const first=room.me.mark==='X'?a:b,second=first===a?b:a;
+  const moved=await act(room,first,'move',{cell:112});
+  assert.ok(moved.game.remaining.X>180000,'A completed turn adds the increment');
+  const finished=await act(moved,second,'resign');
+  assert.equal(finished.game.ratingChanges.X.elo,1020);
+  await assert.rejects(act(finished,first,'rematch'),/tìm đối thủ mới/);
+  assert.equal((await playerRatings(db,first.id,'blitz')).caro.elo,1020);
+  assert.equal((await playerRatings(db,first.id,'rapid')).caro.games,0);
+  assert.equal((await playerRatings(db,first.id)).caro.games,0);
+  assert.equal((await queue.status(a.id)).status,'idle');
+  await queue.update({...c,account_id:'test-account'},'cancel');
+});
+
+test('Search range widens on server time and a disconnected ticket expires',async()=>{
+  const [a,b,c]=await Promise.all([guest(),guest(),guest()]);
+  let now=Date.now();const queue=new Matchmaking(db,rooms,()=>now);
+  const accounts=[a,b,c].map(p=>({...p,account_id:'test-account'}));
+  await db.query("INSERT INTO player_ratings(player_id,kind,pool,elo,updated_at) VALUES($1,'xiangqi','rapid',1100,$2)",[b.id,now]);
+  const search=p=>queue.update(p,'search',{kind:'xiangqi',preset:'10-0'});
+  assert.equal((await search(accounts[0])).eloWindow,25);
+  assert.equal((await search(accounts[1])).status,'searching');
+  now+=15_000;
+  assert.equal((await queue.status(a.id)).botAvailable,true);
+  assert.equal((await queue.update(accounts[0],'poll')).status,'matched');
+  assert.equal((await search(accounts[2])).status,'searching');
+  now+=20_001;
+  assert.equal((await queue.update(accounts[2],'poll')).status,'idle');
+});
+
+test('Personal leaderboard position includes players outside top 50 and excludes provisional ratings',async()=>{
+  const [me,provisional]=await Promise.all([guest(),guest()]);
+  await db.query(`INSERT INTO players(id,display_name,created_at)
+    SELECT ('11111111-1111-4111-8111-'||lpad(i::text,12,'0'))::uuid,'Người chơi '||i,0 FROM generate_series(1,51) i`);
+  await db.query(`INSERT INTO player_ratings(player_id,kind,pool,elo,games,updated_at)
+    SELECT id,'checkers','classical',1400,10,0 FROM players WHERE display_name LIKE 'Người chơi %'`);
+  await db.query(`INSERT INTO player_ratings(player_id,kind,pool,elo,games,updated_at) VALUES
+    ($1,'checkers','classical',1000,10,0),($2,'checkers','classical',2000,9,0)`,[me.id,provisional.id]);
+  assert.equal((await leaderboard(db,'checkers','classical',me.id)).length,50);
+  const placed=await myLeaderboardPosition(db,me.id,'checkers','classical');
+  assert.equal(placed.position,52);assert.equal(placed.rankedPlayers,52);
+  assert.equal((await myLeaderboardPosition(db,provisional.id,'checkers','classical')).position,null);
+  assert.equal((await myLeaderboardPosition(db,me.id,'checkers','rapid')).position,null);
+});
 
 test('Elo rewards upsets, treats draws fairly and places each game independently',async()=>{
   assert.equal(eloDelta(1000,1000,1),12);assert.equal(eloDelta(1000,1000,0),-12);assert.equal(eloDelta(1000,1000,.5),0);
@@ -134,5 +198,19 @@ test('Authenticated rank APIs validate input, resume concurrent requests and ser
       assert.equal((await call(`/practice/${game.id}/actions`,body)).status,200);
       const profile=(await call('/ratings')).ratings;assert.equal(profile.chess.games,1);assert.equal(profile.chess.elo,980);assert.equal(profile.caro.games,0);
     }));
+    const search={action:'search',kind:'monopoly',preset:'15-0'};
+    assert.equal((await a('/matchmaking',search)).status,403);
+    assert.equal((await a('/leaderboard/chess?pool=bad')).status,400);
+    await Promise.all([a,b].map((call,i)=>call('/auth/register',{email:`rank${i}@example.test`,password:'testing-12345',name:`Người chơi ${i}`}).then(result=>assert.equal(result.status,201))));
+    assert.equal((await a('/matchmaking',search)).ticket.status,'searching');
+    const {ticket}=await b('/matchmaking',search);
+    assert.equal(ticket.status,'matched');
+    assert.equal((await a('/matchmaking')).ticket.roomId,ticket.roomId);
+    const {room}=await a(`/rooms/${ticket.roomId}`);
+    assert.equal(room.players.length,2);assert.equal(room.matchmaking.pool,'rapid');
+    const forfeited=await a(`/rooms/${room.id}/actions`,{action:'resign',actionId:randomUUID(),version:room.version});
+    assert.equal(forfeited.room.game.ratingChanges[room.me.mark].elo,980);
+    const {me}=await b('/leaderboard/monopoly?pool=rapid');
+    assert.equal(me.elo,1020);assert.equal(me.position,null);assert.equal(me.placementLeft,9);
   }finally{await app.close();}
 });

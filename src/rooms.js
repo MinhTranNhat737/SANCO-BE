@@ -91,7 +91,7 @@ export class RoomService {
   async persist(client, room) {
     const now = Date.now();
     if(room.ranked&&room.game.phase==='finished'&&room.guest){
-      room.game.ratingChanges=await settleRating(client,{id:room.game.id,kind:room.kind||'caro',source:'room',winner:room.game.result.winner,
+      room.game.ratingChanges=await settleRating(client,{id:room.game.id,kind:room.kind||'caro',pool:room.matchmaking?.pool,source:'room',winner:room.game.result.winner,
         participants:seats(room).map(s=>({id:s.id,mark:s.mark}))});
     }
     room.version += 1;
@@ -148,6 +148,25 @@ export class RoomService {
     }
     throw new GameError('Chưa tạo được phòng. Vui lòng thử lại.', 503);
   }
+  async createMatched(client, user, opponent, kind, config, ratings) {
+    const now=Date.now(), duration=config.minutes*60000;
+    const makeSeat=(player,mark,elo)=>({id:player.id,name:player.display_name,mark,elo,ready:true,rematch:false});
+    const first=!!(randomBytes(1)[0]%2);
+    const owner=makeSeat(user,boardSide(kind,first),ratings[0]);
+    const guest=makeSeat(opponent,boardSide(kind,!first),ratings[1]);
+    for(let attempt=0;attempt<3;attempt++){
+      const id=randomBytes(4).toString('hex').toUpperCase();
+      const game=newGame(duration,randomUUID(),kind);
+      game.phase='playing';game.turnStartedAt=now;
+      const room={id,kind,ranked:true,matchmaking:config,version:0,duration,createdAt:now,updatedAt:now,
+        owner,guest,inviteHash:null,inviteExpiresAt:0,drawOffer:null,game,
+        ...(PARTY_KINDS.includes(kind)?{capacity:2,players:[owner,guest]}:{})};
+      const inserted=await client.query(`INSERT INTO rooms(id,owner_id,guest_id,state,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$5) ON CONFLICT(id) DO NOTHING RETURNING id`,[id,owner.id,guest.id,JSON.stringify(room),now]);
+      if(inserted.rows.length)return room;
+    }
+    throw new GameError('Chưa tạo được ván xếp hạng. Vui lòng thử lại.',503);
+  }
   async get(id, actor) {
     // Authorize before processing expiry or exposing any metadata; normal reads take no write transaction.
     const room = await this.read(id);
@@ -181,6 +200,7 @@ export class RoomService {
     const token = secret();
     const room = await this.db.transaction(async client => {
       const room = await this.read(id, client, true);
+      if(room.matchmaking)throw new GameError('Ván tìm trận không dùng link mời.',403);
       if (room.owner.id !== actor) throw new GameError('Chỉ chủ phòng có thể thay lời mời.', 403);
       room.inviteHash = digest(token); room.inviteExpiresAt = Date.now() + 86400000;
       await this.persist(client, room); return room;
@@ -205,7 +225,12 @@ export class RoomService {
       // Expiry is committed even when the incoming move is too late.
       if (settleTimeout(room, now)) { await this.persist(client, room); stale = true; return room; }
       if (room.version !== version) throw new GameError('Bàn cờ vừa cập nhật. Hãy kiểm tra và thực hiện lại thao tác.', 409);
+      if(room.matchmaking&&action==='rematch')throw new GameError('Hãy tìm đối thủ mới cho ván xếp hạng tiếp theo.',409);
+      const previousTurn=room.game.turn;
       applyAction(room, actor, action, { cell, from, to, promotion,pass,details,action:command }, now, randomUUID());
+      if(action==='move'&&room.matchmaking?.increment&&room.game.phase==='playing'&&(room.game.turn!==previousTurn||room.game.passed)){
+        room.game.remaining[previousTurn]+=room.matchmaking.increment*1000;
+      }
       await this.persist(client, room);
       await client.query('INSERT INTO action_receipts(room_id,player_id,action_id,request_hash,created_at) VALUES($1,$2,$3,$4,$5)', [id, actor, actionId, requestHash, now]);
       return room;

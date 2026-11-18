@@ -1,4 +1,3 @@
-import {randomInt} from 'node:crypto';
 import {KINDS} from './practice-engine.js';
 import {GameError} from './game.js';
 
@@ -32,28 +31,46 @@ export function selectBot(kind,elo,id){
   const nearest=[...roster].sort((a,b)=>Math.abs(a.elo-elo)-Math.abs(b.elo-elo));
   return nearest[0];
 }
-export async function playerRatings(db,playerId){
-  const {rows}=await db.query('SELECT * FROM player_ratings WHERE player_id=$1',[playerId]);
+export const RATING_POOLS=['overall','blitz','rapid','classical'];
+export function validPool(pool){
+  if(!RATING_POOLS.includes(pool))throw new GameError('Nhóm thời gian không hợp lệ.');
+  return pool;
+}
+export async function playerRatings(db,playerId,pool='overall'){
+  const {rows}=await db.query('SELECT * FROM player_ratings WHERE player_id=$1 AND pool=$2',[playerId,validPool(pool)]);
   return Object.fromEntries(KINDS.map(kind=>[kind,ratingView(rows.find(row=>row.kind===kind))]));
 }
-export async function leaderboard(db,kind){
+export async function leaderboard(db,kind,pool='overall',actor){
   validKind(kind);
+  validPool(pool);
   const {rows}=await db.query(`SELECT r.*,p.display_name FROM player_ratings r JOIN players p ON p.id=r.player_id
-    WHERE r.kind=$1 AND r.games >= $2 ORDER BY r.elo DESC,r.games DESC,r.player_id LIMIT 50`,[kind,PLACEMENT_GAMES]);
-  return rows.map((row,index)=>({position:index+1,name:row.display_name,...ratingView(row)}));
+    WHERE r.kind=$1 AND r.games >= $2 AND r.pool=$3 ORDER BY r.elo DESC,r.games DESC,r.player_id LIMIT 50`,[kind,PLACEMENT_GAMES,pool]);
+  return rows.map((row,index)=>({position:index+1,name:row.display_name,...ratingView(row),...(actor?{me:row.player_id===actor}:{})}));
+}
+export async function myLeaderboardPosition(db,actor,kind,pool){
+  const {rows:[row]}=await db.query(`SELECT own.elo,own.games,own.peak,own.wins,own.draws,own.losses,
+    count(r.player_id)::int AS ranked_players,
+    CASE WHEN own.games >= $4 THEN 1 + count(r.player_id) FILTER (WHERE
+      r.elo>own.elo OR (r.elo=own.elo AND (r.games>own.games OR (r.games=own.games AND r.player_id<own.player_id)))) END AS position
+    FROM (SELECT 1) anchor
+    LEFT JOIN player_ratings own ON own.player_id=$1 AND own.kind=$2 AND own.pool=$3
+    LEFT JOIN player_ratings r ON r.kind=$2 AND r.pool=$3 AND r.games >= $4
+    GROUP BY own.player_id,own.elo,own.games,own.peak,own.wins,own.draws,own.losses`,[actor,validKind(kind),validPool(pool),PLACEMENT_GAMES]);
+  return {...ratingView(row),position:row.position===null?null:Number(row.position),rankedPlayers:row.ranked_players};
 }
 
 // Called inside the same transaction that finishes the game. Sorted row locks
 // serialize concurrent matches, and the settlement key makes retries harmless.
-export async function settleRating(client,{id,kind,source,participants,winner}){
+export async function settleRating(client,{id,kind,pool='overall',source,participants,winner}){
   validKind(kind);
+  validPool(pool);
   const claim=await client.query('INSERT INTO rating_settlements(game_id,kind,source,changes,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING game_id',[id,kind,source,'{}',Date.now()]);
   if(!claim.rows.length){const {rows}=await client.query('SELECT changes FROM rating_settlements WHERE game_id=$1',[id]);return rows[0].changes;}
   const people=participants.filter(p=>p.id).sort((a,b)=>a.id.localeCompare(b.id));
   const ratings=new Map();
   for(const person of people){
-    await client.query('INSERT INTO player_ratings(player_id,kind,updated_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[person.id,kind,Date.now()]);
-    const {rows}=await client.query('SELECT * FROM player_ratings WHERE player_id=$1 AND kind=$2 FOR UPDATE',[person.id,kind]);
+    await client.query('INSERT INTO player_ratings(player_id,kind,pool,updated_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[person.id,kind,pool,Date.now()]);
+    const {rows}=await client.query('SELECT * FROM player_ratings WHERE player_id=$1 AND kind=$2 AND pool=$3 FOR UPDATE',[person.id,kind,pool]);
     ratings.set(person.id,rows[0]);
   }
   const changes={};
@@ -68,7 +85,7 @@ export async function settleRating(client,{id,kind,source,participants,winner}){
     },0)/opponents.length;
     const after=Math.max(100,current.elo+Math.round((current.games<PLACEMENT_GAMES?40:24)*difference));
     const {rows}=await client.query(`UPDATE player_ratings SET elo=$1,games=games+1,wins=wins+$2,draws=draws+$3,losses=losses+$4,peak=GREATEST(peak,$1),updated_at=$5
-      WHERE player_id=$6 AND kind=$7 RETURNING *`,[after,score===1?1:0,score===.5?1:0,score===0?1:0,Date.now(),person.id,kind]);
+      WHERE player_id=$6 AND kind=$7 AND pool=$8 RETURNING *`,[after,score===1?1:0,score===.5?1:0,score===0?1:0,Date.now(),person.id,kind,pool]);
     changes[person.mark]={before:current.elo,after,delta:after-current.elo,...ratingView(rows[0])};
   }
   await client.query('UPDATE rating_settlements SET changes=$1 WHERE game_id=$2',[JSON.stringify(changes),id]);
