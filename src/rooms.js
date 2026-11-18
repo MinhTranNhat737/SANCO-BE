@@ -1,10 +1,13 @@
 import { randomUUID, randomBytes } from 'node:crypto';
-import { GameError, newGame, other, applyAction, settleTimeout, seatOf, publicRoom, KINDS, boardSide, seats } from './room-game.js';
+import { GameError, newGame, other, applyAction, settleTimeout, seatOf, publicRoom, KINDS, boardSide, seats, clockDeadline, startRoomGame } from './room-game.js';
+import { COMMANDER_DURATION_MS } from './commander.js';
 import {PARTY_KINDS,PARTY_SIDES} from './party-games.js';
 import { digest, secret } from './auth.js';
 import {settleRating} from './ratings.js';
 
 export const ROOM_INACTIVITY_MS = 5 * 60 * 1000;
+const hasProtectedClock = room => room.game.phase==='playing'&&(room.ranked||room.game.matchDeadline!=null);
+const canExpireForInactivity = "NOT ((COALESCE(state->>'ranked','false')='true' OR (state->'game'->>'matchDeadline') IS NOT NULL) AND state->'game'->>'phase'='playing')";
 
 // Strip replay arrays in SQL, before they enter Node or travel to the lobby.
 const summaryProjection = column => `jsonb_set(${column}, '{game}', (${column}->'game') - ARRAY['board','initialBoard','moves','repetitions','seenPositions','party','initialParty','legal'] || jsonb_build_object('moveCount',jsonb_array_length(${column}->'game'->'moves')))`;
@@ -39,9 +42,8 @@ export class RoomService {
       const { rows } = await client.query('SELECT state, updated_at FROM rooms WHERE id = $1 FOR UPDATE', [id]);
       if (!rows[0] || Number(rows[0].updated_at) > cutoff) return null;
       const room = rows[0].state;
-      // Ranked clocks decide forfeits. Deleting a live ranked table would let a
-      // losing player escape their result by leaving before the clock runs out.
-      if(room.ranked&&room.game.phase==='playing')return null;
+      // Rated games and shared-clock commander matches settle at their deadline.
+      if(hasProtectedClock(room))return null;
       const memberIds = [...new Set([room.owner?.id, room.guest?.id, ...seats(room).map(s => s.id)].filter(Boolean))];
       clearTimeout(this.timers.get(id));
       this.timers.delete(id);
@@ -55,7 +57,7 @@ export class RoomService {
     if (this.closed || this.inactivityMs <= 0) return;
     const cutoff = Date.now() - this.inactivityMs;
     const current=await this.read(id);
-    if(current.ranked&&current.game.phase==='playing')return;
+    if(hasProtectedClock(current))return;
     const deleted = await this.cancelInactiveRoom(id, cutoff);
     if (deleted) {
       await this.scheduleSweep();
@@ -65,7 +67,7 @@ export class RoomService {
   async pruneInactive(now = Date.now()) {
     if (this.closed || this.inactivityMs <= 0) return [];
     const cutoff = now - this.inactivityMs;
-    const { rows } = await this.db.query("SELECT id FROM rooms WHERE updated_at <= $1 AND NOT (COALESCE(state->>'ranked','false')='true' AND state->'game'->>'phase'='playing')", [cutoff]);
+    const { rows } = await this.db.query(`SELECT id FROM rooms WHERE updated_at <= $1 AND ${canExpireForInactivity}`, [cutoff]);
     const removed = [];
     for (const row of rows) {
       const out = await this.cancelInactiveRoom(row.id, cutoff);
@@ -79,7 +81,7 @@ export class RoomService {
     this.sweepTimer = null;
     if (this.closed || this.inactivityMs <= 0) return;
     try {
-      const { rows } = await this.db.query("SELECT MIN(updated_at) AS oldest FROM rooms WHERE NOT (COALESCE(state->>'ranked','false')='true' AND state->'game'->>'phase'='playing')");
+      const { rows } = await this.db.query(`SELECT MIN(updated_at) AS oldest FROM rooms WHERE ${canExpireForInactivity}`);
       if (this.closed || !rows[0]?.oldest) return;
       const delay = Math.max(10, Number(rows[0].oldest) + this.inactivityMs - Date.now());
       this.sweepTimer = setTimeout(() => { this.pruneInactive().catch(error => console.error('Room inactivity sweep failed:', error.message)); }, Math.min(delay, 2147483647));
@@ -105,8 +107,9 @@ export class RoomService {
   changed(room) { if (!this.closed) { this.schedule(room); void this.scheduleSweep(); this.onChange(room); } }
   schedule(room) {
     clearTimeout(this.timers.get(room.id)); this.timers.delete(room.id);
-    if (this.closed || room.game.phase !== 'playing') return;
-    const delay = Math.max(1, room.game.turnStartedAt + room.game.remaining[room.game.turn] - Date.now());
+    const deadline=clockDeadline(room.game);
+    if (this.closed || deadline===null) return;
+    const delay = Math.max(1, deadline - Date.now());
     const timer = setTimeout(() => this.expire(room.id).catch(error => { console.error('Clock persistence failed:', error.message); if (!this.closed) { const retry = setTimeout(() => this.expire(room.id).catch(console.error), 1000); retry.unref(); this.timers.set(room.id, retry); } }), Math.min(delay, 2147483647));
     timer.unref(); this.timers.set(room.id, timer);
   }
@@ -129,7 +132,8 @@ export class RoomService {
     if(!KINDS.includes(kind))throw new GameError('Môn cờ không hợp lệ.');
     if(!['first','second','random'].includes(side))throw new GameError('Bên quân không hợp lệ.');
     if(!Number.isInteger(capacity)||capacity<2||capacity>(PARTY_KINDS.includes(kind)?4:2))throw new GameError('Số người không hợp lệ.');
-    if (!(kind==='monopoly'?[3,5,10,15,30,60,120]:[3,5,10,15]).includes(minutes)) throw new GameError('Chọn thời gian 3, 5, 10 hoặc 15 phút.');
+    if (!(kind==='monopoly'?[3,5,10,15,30,60,120]:kind==='commander'?[3,5,10,15,30]:[3,5,10,15]).includes(minutes)) throw new GameError('Thời gian không hợp lệ cho môn cờ này.');
+    if(kind==='commander')minutes=COMMANDER_DURATION_MS/60_000;
     await this.pruneInactive();
     const { rows } = await this.db.query("SELECT count(*)::integer AS n FROM rooms WHERE owner_id=$1 AND state->'game'->>'phase'='waiting'", [user.id]);
     if (rows[0].n >= 10) throw new GameError('Bạn đã có 10 phòng chờ. Hãy dùng một phòng đang có.', 429);
@@ -157,7 +161,7 @@ export class RoomService {
     for(let attempt=0;attempt<3;attempt++){
       const id=randomBytes(4).toString('hex').toUpperCase();
       const game=newGame(duration,randomUUID(),kind);
-      game.phase='playing';game.turnStartedAt=now;
+      startRoomGame(game,now);
       const room={id,kind,ranked:true,matchmaking:config,version:0,duration,createdAt:now,updatedAt:now,
         owner,guest,inviteHash:null,inviteExpiresAt:0,drawOffer:null,game,
         ...(PARTY_KINDS.includes(kind)?{capacity:2,players:[owner,guest]}:{})};
@@ -174,9 +178,9 @@ export class RoomService {
     if (this.inactivityMs > 0 && Date.now() - room.updatedAt >= this.inactivityMs) {
       await this.ensureActive(id);
     }
-    const g=room.game;
+    const deadline=clockDeadline(room.game);
     // Ordinary reads do not acquire a write lock or reset a clock timer.
-    if(g.phase==='playing'&&g.turnStartedAt!==null&&Date.now()>=g.turnStartedAt+g.remaining[g.turn])return this.view(await this.expire(id),actor);
+    if(deadline!==null&&Date.now()>=deadline)return this.view(await this.expire(id),actor);
     return this.view(room,actor);
   }
   async join(id, actor, token) {

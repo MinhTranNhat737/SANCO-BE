@@ -2,7 +2,8 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {createPractice,legalMoves,makePracticeMove,undoHumanTurn} from '../src/practice-engine.js';
-import {initialCommander,commanderMove,commanderLegal,ctlUnits} from '../src/commander.js';
+import {COMMANDER_DURATION_MS,initialCommander,commanderMove,commanderLegal,ctlUnits} from '../src/commander.js';
+import {clockDeadline,newGame,settleTimeout,startRoomGame} from '../src/room-game.js';
 import {chooseBotMove} from '../src/bot.js';
 import {createApplication} from '../src/app.js';
 const at=(y,x)=>(11-y)*11+x;
@@ -18,7 +19,9 @@ const kings=[[0,10,'rK'],[11,9,'bK']];
 test('Commander preset has 132 intersections, 38 units, all 11 types, and exact symmetric placement',()=>{
   const b=initialCommander();assert.equal(b.length,132);assert.equal(b.filter(Boolean).length,38);
   for(const side of['r','b']){const u=b.filter(v=>v?.[0]===side);assert.equal(u.length,19);assert.equal(new Set(u.map(p=>p[1])).size,11);assert.equal(u.filter(p=>p[1]==='H').length,2);}
-  assert.equal(b[at(0,6)],'rK');assert.equal(b[at(11,6)],'bK');assert.equal(b[at(4,2)],'rH');
+  for(const [type,positions] of Object.entries({K:[[0,6]],N:[[1,1],[3,2]],F:[[1,4],[1,8]],H:[[1,5],[1,7]],P:[[2,3],[2,9]],M:[[2,6]],A:[[3,4],[3,8]],T:[[3,5],[3,7]],I:[[4,2],[4,10]],E:[[4,3],[4,9]],D:[[4,6]]})){
+    for(const [y,x] of positions){assert.equal(b[at(y,x)],'r'+type);assert.equal(b[at(11-y,x)],'b'+type);}
+  }
 });
 
 test('Movement ranges, immobile headquarters, blockers, and artillery capture over blockers are enforced',()=>{
@@ -58,7 +61,7 @@ test('Aircraft can bomb or land, must occupy air-to-air captures, and AA uses ci
 test('Protected targets exchange with aircraft, unrelated AA intercepts before the target, heroes bypass AA',()=>{
   const exchange=position([...kings,[3,4,'rF+rK'],[6,4,'bA'],[0,10,'rI'],[7,9,'bI']]);
   makePracticeMove(exchange,move([3,4],[6,4],0,'bomb'));assert.equal(exchange.board[at(3,4)],null);assert.equal(exchange.board[at(6,4)],null);
-  assert.equal(exchange.result.winner,'b');assert.ok(exchange.commander.scores.b>=1040);
+  assert.equal(exchange.result.winner,'b');assert.equal(exchange.commander.scores.b,140);
   const intercepted=position([...kings,[2,4,'rF'],[3,4,'bA'],[6,4,'bI'],[0,3,'rI']]);
   makePracticeMove(intercepted,move([2,4],[6,4],0,'bomb'));assert.equal(intercepted.board[at(6,4)],'bI');assert.equal(intercepted.board[at(2,4)],null);
   const stealth=position([...kings,[3,4,'rF*'],[6,4,'bM'],[0,3,'rI']]);
@@ -91,9 +94,41 @@ test('Hero award follows a commander escape; last guard and stealth use their ex
   const guard=position([...kings,[3,4,'rI'],[10,3,'bI'],[10,5,'bT']]);makePracticeMove(guard,move([3,4],[3,5]));assert.equal(guard.board[at(3,5)],'rI*');guard.turn='r';assert.ok(has(guard,move([3,5],[5,7])));
 });
 
-test('Commander cannot walk through controlled points; exposed commanders can be captured; total battle ends',()=>{
-  const g=position([[0,4,'rK'],[8,10,'bK'],[3,3,'bT'],[0,9,'rI']]);assert.ok(!has(g,move([0,4],[5,4])));
+test('Commander can pass an empty threatened point; exposed commanders can be captured',()=>{
+  const g=position([[0,4,'rK'],[8,10,'bK'],[3,3,'bT'],[0,9,'rI']]);assert.ok(has(g,move([0,4],[5,4])));
+  g.rules='commander-total-v1';assert.ok(!has(g,move([0,4],[5,4])));
   const facing=position([[0,5,'rK'],[9,5,'bK'],[0,9,'rI'],[11,9,'bI']]);assert.ok(has(facing,move([0,5],[9,5])));makePracticeMove(facing,move([0,5],[9,5]));assert.equal(facing.result.winner,'r');
+});
+
+test('A new commander room times the whole match and awards the result by captured points',()=>{
+  const start=1000, deadline=start+COMMANDER_DURATION_MS;
+  const game=newGame(COMMANDER_DURATION_MS,randomUUID(),'commander');
+  const room={kind:'commander',game};
+  assert.equal(clockDeadline(game),null);
+  startRoomGame(game,start);
+  game.turnStartedAt+=100_000;
+  game.remaining.r=1;
+  assert.equal(clockDeadline(game),deadline);
+  assert.equal(settleTimeout(room,deadline-1),false);
+  game.commander.scores={r:30,b:40};
+  assert.equal(settleTimeout(room,deadline),true);
+  assert.deepEqual(game.result,{winner:'b',reason:'commander-time-score',line:[],at:deadline});
+  assert.equal(settleTimeout(room,deadline+1),false);
+  const tied=newGame(COMMANDER_DURATION_MS,randomUUID(),'commander');
+  startRoomGame(tied,start);
+  assert.equal(settleTimeout({kind:'commander',game:tied},deadline),true);
+  assert.equal(tied.result.winner,null);
+});
+
+test('Coastline attacks use the unit type and a combined order must use different directions',()=>{
+  const coast=position([...kings,[4,2,'bN'],[4,3,'rI'],[7,2,'rN'],[8,2,'bI'],[9,2,'bT']]);
+  assert.ok(has(coast,move([4,3],[4,2],0,'fire')));
+  assert.ok(!has(coast,move([4,3],[4,2])));
+  assert.ok(has(coast,move([7,2],[9,2])));
+  const stack=position([...kings,[3,5,'rT+rI'],[8,3,'bI']]);
+  const a=move([3,5],[5,5]), b=move([3,5],[4,5],1);
+  assert.ok(has(stack,a)&&has(stack,b));
+  assert.equal(commanderMove(stack,{...a,action:'ctl-combined',details:{orders:[{unit:0,to:a.to,mode:'move'},{unit:1,to:b.to,mode:'move'}]}}),null);
 });
 
 test('Every bot difficulty yields an accepted command, and undo reconstructs commands and score',()=>{
@@ -107,8 +142,11 @@ before(async()=>{app=await createApplication({database:{memory:true},disableRate
 after(async()=>{await app.close();});
 function client(){let cookie='';return {async call(path,body,status=200){const r=await fetch(origin+'/api'+path,{method:body?'POST':'GET',headers:{Cookie:cookie,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];const out=await r.json();assert.equal(r.status,status,JSON.stringify(out));return out;}};}
 test('Commander rooms and worker bots work through authenticated HTTP, deduplication, replay and rematch',async()=>{
-  const a=client(),b=client();await a.call('/me');await b.call('/me');await a.call('/auth/register',{name:'Tư lệnh',email:`${randomUUID()}@example.test`,password:'a-long-test-password'},201);let {room,token}=await a.call('/rooms',{kind:'commander',minutes:5,side:'first'},201);await b.call(`/rooms/${room.id}/join`,{token});room=(await a.call(`/rooms/${room.id}`)).room;
+  const a=client(),b=client();await a.call('/me');await b.call('/me');await a.call('/auth/register',{name:'Tư lệnh',email:`${randomUUID()}@example.test`,password:'a-long-test-password'},201);let {room,token}=await a.call('/rooms',{kind:'commander',minutes:5,side:'first',ranked:false},201);await b.call(`/rooms/${room.id}/join`,{token});room=(await a.call(`/rooms/${room.id}`)).room;
   for(const user of[a,b])room=(await user.call(`/rooms/${room.id}/actions`,{action:'ready',version:room.version,actionId:randomUUID()})).room;
+  assert.equal(room.duration,COMMANDER_DURATION_MS);assert.equal(room.game.matchDeadline-room.game.turnStartedAt,COMMANDER_DURATION_MS);
+  await app.db.query('UPDATE rooms SET updated_at=$1 WHERE id=$2',[Date.now()-6*60_000,room.id]);
+  assert.ok(!(await app.rooms.pruneInactive()).includes(room.id));
   room=(await a.call(`/rooms/${room.id}`)).room;const m=room.game.legal[0],{action:command,...coords}=m,body={...coords,command,action:'move',version:room.version,actionId:randomUUID()};room=(await a.call(`/rooms/${room.id}/actions`,body)).room;
   assert.equal((await a.call(`/rooms/${room.id}/actions`,body)).room.game.moves.length,1);assert.deepEqual((await b.call(`/rooms/${room.id}`)).room.game.board,room.game.board);
   room=(await b.call(`/rooms/${room.id}/actions`,{action:'resign',version:room.version,actionId:randomUUID()})).room;assert.equal((await a.call(`/matches/${room.game.id}`)).room.game.board.length,132);

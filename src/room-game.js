@@ -1,6 +1,7 @@
 import * as caro from './game.js';
 import {KINDS,boardSide,oppositeSide,createPractice,legalMoves,makePracticeMove} from './practice-engine.js';
 import {PARTY_KINDS,newParty,eliminateParty} from './party-games.js';
+import {COMMANDER_RULE,COMMANDER_DURATION_MS} from './commander.js';
 export const {GameError}=caro;
 export const seats=room=>room.players||[room.owner,room.guest].filter(Boolean);
 export function seatOf(room,actor){const me=seats(room).find(s=>s.id===actor);if(!me)throw new GameError('Bạn chưa có quyền vào phòng này. Hãy mở liên kết mời.',403);return me;}
@@ -9,13 +10,27 @@ export function newGame(duration,id,kind='caro',count=2){
   if(kind==='caro')return caro.newGame(duration,id);
   const g=createPractice(kind,boardSide(kind),'medium',id);
   if(PARTY_KINDS.includes(kind)){g.party=newParty(kind,count);g.initialParty=structuredClone(g.party);}
-  return {...g,phase:'waiting',rules:kind==='monopoly'?'monopoly-room-vn-v2':`${kind}-room-v1`,remaining:Object.fromEntries((g.party?.sides||[boardSide(kind),boardSide(kind,false)]).map(side=>[side,duration])),turnStartedAt:null};
+  return {...g,phase:'waiting',rules:kind==='commander'?COMMANDER_RULE:kind==='monopoly'?'monopoly-room-vn-v2':`${kind}-room-v1`,remaining:Object.fromEntries((g.party?.sides||[boardSide(kind),boardSide(kind,false)]).map(side=>[side,duration])),turnStartedAt:null};
+}
+export function startRoomGame(game,now){
+  game.phase='playing';game.turnStartedAt=now;
+  if(game.rules===COMMANDER_RULE)game.matchDeadline=now+COMMANDER_DURATION_MS;
+}
+export function clockDeadline(game){
+  if(game.phase!=='playing'||game.turnStartedAt===null)return null;
+  return game.matchDeadline??game.turnStartedAt+game.remaining[game.turn];
 }
 export function settleTimeout(room,now){
   if((room.kind||'caro')==='caro')return caro.settleTimeout(room,now);
   const g=room.game;
-  if(g.phase!=='playing'||g.turnStartedAt===null||now<g.turnStartedAt+g.remaining[g.turn])return false;
-  const deadline=g.turnStartedAt+g.remaining[g.turn];g.remaining[g.turn]=0;
+  const deadline=clockDeadline(g);
+  if(deadline===null||now<deadline)return false;
+  if(g.matchDeadline!=null){
+    const {r,b}=g.commander.scores;
+    caro.finish(g,r===b?null:r>b?'r':'b','commander-time-score',deadline);
+    return true;
+  }
+  g.remaining[g.turn]=0;
   if(g.party){eliminateParty(g,g.turn,'timeout');g.turnStartedAt=g.phase==='playing'?now:null;}else caro.finish(g,other(g.turn,room.kind),'timeout',deadline);return true;
 }
 export function applyAction(room,actor,action,data,now,nextGameId){
@@ -23,19 +38,20 @@ export function applyAction(room,actor,action,data,now,nextGameId){
   const me=seatOf(room,actor),g=room.game;
   if(action==='ready'){
     if(g.phase!=='waiting')throw new GameError('Ván đã bắt đầu.',409);
-    me.ready=!me.ready;if(seats(room).length===(room.capacity||2)&&seats(room).every(s=>s.ready)){g.phase='playing';g.turnStartedAt=now;}return;
+    me.ready=!me.ready;if(seats(room).length===(room.capacity||2)&&seats(room).every(s=>s.ready))startRoomGame(g,now);return;
   }
   if(action==='rematch'){
     if(g.phase!=='finished')throw new GameError('Chờ ván hiện tại kết thúc.',409);
     me.rematch=!me.rematch;
     if(seats(room).length>1&&seats(room).every(s=>s.rematch)){
       for(const s of seats(room)){s.mark=g.party?g.party.sides[(g.party.sides.indexOf(s.mark)+1)%g.party.sides.length]:other(s.mark,room.kind);s.ready=false;s.rematch=false;}
+      if(room.kind==='commander')room.duration=COMMANDER_DURATION_MS;
       room.drawOffer=null;room.game=newGame(room.duration,nextGameId,room.kind,room.capacity);
     }return;
   }
   if(g.phase!=='playing')throw new GameError('Ván chưa bắt đầu hoặc đã kết thúc.',409);
   if(g.party&&!g.party.players.find(p=>p.side===me.mark)?.active)throw new GameError('Bạn đã dừng ván.',409);
-  const consume=()=>{g.remaining[g.turn]=Math.max(0,g.remaining[g.turn]-(now-g.turnStartedAt));};
+  const consume=()=>{if(g.matchDeadline==null)g.remaining[g.turn]=Math.max(0,g.remaining[g.turn]-(now-g.turnStartedAt));};
   if(action==='resign'){consume();if(g.party){eliminateParty(g,me.mark);g.turnStartedAt=g.phase==='playing'?now:null;}else caro.finish(g,other(me.mark,room.kind),'resign',now);return;}
   if(g.party&&['draw','decline'].includes(action))throw new GameError('Ván nhiều người không hỗ trợ xin hòa.');
   if(action==='draw'){
@@ -50,7 +66,7 @@ export function applyAction(room,actor,action,data,now,nextGameId){
   if(g.turn!==me.mark)throw new GameError('Chưa đến lượt bạn.',409);
   const previous=g.turn,started=g.turnStartedAt;
   makePracticeMove(g,data,now);
-  g.remaining[previous]=Math.max(0,g.remaining[previous]-(now-started));
+  if(g.matchDeadline==null)g.remaining[previous]=Math.max(0,g.remaining[previous]-(now-started));
   g.turnStartedAt=g.phase==='playing'?now:null;
   if(room.drawOffer&&room.drawOffer!==actor)room.drawOffer=null;
 }

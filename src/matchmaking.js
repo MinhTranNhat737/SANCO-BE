@@ -2,13 +2,15 @@ import {GameError} from './game.js';
 import {KINDS} from './practice-engine.js';
 import {PARTY_KINDS} from './party-games.js';
 import {INITIAL_ELO,validKind} from './ratings.js';
+import {COMMANDER_DURATION_MS} from './commander.js';
 
 const LEASE_MS=20_000;
 export const BOT_OFFER_MS=15_000;
 const preset=(minutes,increment,pool)=>({id:`${minutes}-${increment}`,minutes,increment,pool});
 const boardPresets=[preset(3,0,'blitz'),preset(3,2,'blitz'),preset(5,0,'blitz'),preset(10,0,'rapid'),preset(15,10,'rapid'),preset(30,0,'classical')];
 const partyPresets=[preset(5,0,'blitz'),preset(10,0,'rapid'),preset(15,0,'rapid'),preset(30,0,'classical'),preset(60,0,'classical')];
-export const matchPresets=Object.fromEntries(KINDS.map(kind=>[kind,PARTY_KINDS.includes(kind)?partyPresets:boardPresets]));
+const commanderPresets=[preset(COMMANDER_DURATION_MS/60_000,0,'classical')];
+export const matchPresets=Object.fromEntries(KINDS.map(kind=>[kind,kind==='commander'?commanderPresets:PARTY_KINDS.includes(kind)?partyPresets:boardPresets]));
 export const eloWindow=waitMs=>Math.min(200,25+25*Math.floor(Math.max(0,waitMs)/3500));
 
 const ticketSql=`SELECT q.*, room.state->'game'->>'phase' AS phase FROM rank_queue q
@@ -53,6 +55,10 @@ export class Matchmaking {
       const kind=selection?.kind??current.kind;
       const presetId=selected?.id??current.preset;
       const config=selected??matchPresets[kind].find(p=>p.id===presetId);
+      if(!config){
+        await client.query('DELETE FROM rank_queue WHERE player_id=$1',[user.id]);
+        return {view:{status:'idle'}};
+      }
       const sameSearch=prior.status==='searching'&&prior.kind===kind&&prior.preset===presetId;
       const joinedAt=sameSearch?Number(current.joined_at):now;
       await client.query(`INSERT INTO rank_queue(player_id,kind,preset,joined_at,expires_at) VALUES($1,$2,$3,$4,$5)

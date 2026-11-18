@@ -1,6 +1,9 @@
-// Cờ tư lệnh: preset full battle. Rule profile and adjudications: COMMANDER.md.
+// Cờ tư lệnh: chế độ Tổng lực do Nguyễn Quý Hải công bố. Tham khảo COMMANDER.md.
 export const CTL_COLS=11,CTL_ROWS=12;
+export const COMMANDER_RULE='commander-total-v2';
+export const COMMANDER_DURATION_MS=30*60_000;
 export const CTL_VALUES={K:1000,I:10,E:10,T:20,A:10,P:30,M:20,F:40,N:80,H:10,D:10};
+const notation={K:'★',I:'B',E:'C',T:'T',A:'F',P:'P',M:'L',F:'K',N:'H',H:'S',D:'D'};
 const dirs=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
 export const ctlUnits=cell=>cell?cell.split('+'):[];
 const pack=units=>units.length?units.join('+'):null;
@@ -13,7 +16,13 @@ const land=i=>col(i)>=2;
 export const ctlCoordinate=i=>`${11-row(i)},${col(i)}`;
 export function initialCommander(){
   const board=Array(132).fill(null);
-  const setup=[[0,6,'K'],[1,1,'N'],[1,4,'F'],[1,5,'T'],[1,7,'T'],[1,8,'F'],[2,3,'I'],[2,6,'M'],[2,9,'I'],[3,2,'N'],[3,4,'A'],[3,5,'E'],[3,7,'E'],[3,8,'A'],[4,2,'H'],[4,3,'P'],[4,6,'D'],[4,9,'P'],[4,10,'H']];
+  const setup=[
+    [0,6,'K'],
+    [1,1,'N'],[1,4,'F'],[1,5,'H'],[1,7,'H'],[1,8,'F'],
+    [2,3,'P'],[2,6,'M'],[2,9,'P'],
+    [3,2,'N'],[3,4,'A'],[3,5,'T'],[3,7,'T'],[3,8,'A'],
+    [4,2,'I'],[4,3,'E'],[4,6,'D'],[4,9,'E'],[4,10,'I'],
+  ];
   for(const [y,x,t]of setup){board[(11-y)*11+x]='r'+t;board[y*11+x]='b'+t;}
   return board;
 }
@@ -30,9 +39,9 @@ function range(unit,diagonal,capture){
   if(diagonal&&!['D','P','M','F','N'].includes(t)&&!bonus)return 0;
   return (diagonal&&t==='M'?1:base)+bonus;
 }
-function crossesDeep(path,from){
+function crossesDeep(path,from,original){
   let previous=from;
-  for(const next of path){if((row(previous)===5&&row(next)===6||row(previous)===6&&row(next)===5)&&![5,7].includes(col(previous)))return true;previous=next;}
+  for(const next of path){if((row(previous)===5&&row(next)===6||row(previous)===6&&row(next)===5)&&(![5,7].includes(col(previous))||original&&col(next)!==col(previous)))return true;previous=next;}
   return false;
 }
 function canCarry(carrier,passengers,index){
@@ -46,17 +55,18 @@ function airZones(board,enemy){
   return board.flatMap((cell,index)=>ctlUnits(cell).filter(u=>u[0]===enemy&&['A','M','N'].includes(type(u))).map(u=>({index,radius:(type(u)==='M'?2:1)+(hero(u)?1:0)})));
 }
 const inZone=(i,z)=>(row(i)-row(z.index))**2+(col(i)-col(z.index))**2<=z.radius**2;
-function blocked(board,path,unit,from,capture){
+function blocked(board,path,unit,from,capture,original=false){
   const t=type(unit);
   if(t==='F'||t==='P'&&capture)return false;
+  const alongCoast=col(from)===2&&path.every(p=>col(p)===2);
   return path.slice(0,-1).some(i=>{
     if(!board[i])return false;
     // At the coast, ships and land forces use separate lanes.
-    if(t==='N')return ctlUnits(board[i]).some(u=>type(u)==='N');
-    return !(col(from)===2&&path.every(p=>col(p)===2)&&type(ctlUnits(board[i])[0])==='N');
+    if(t==='N'&&(!original||alongCoast))return ctlUnits(board[i]).some(u=>type(u)==='N');
+    return !(t!=='N'&&alongCoast&&type(ctlUnits(board[i])[0])==='N');
   });
 }
-function rawMoves(board,side){
+function rawMoves(board,side,original=false){
   const moves=[];
   for(let from=0;from<132;from++){
     const units=ctlUnits(board[from]);if(!units.length||units[0][0]!==side)continue;
@@ -68,7 +78,8 @@ function rawMoves(board,side){
         const path=route(from,to),diagonal=!!(dr&&dc);
         const facing=t==='K'&&capture&&target[0]===other(side)+'K'&&!diagonal&&!blocked(board,path,unit,from,true);
         if(distance>range(unit,diagonal,capture)&&!facing)continue;
-        if(blocked(board,path,unit,from,capture))continue;
+        const shipArtillery=t==='N'&&capture&&type(target[0])!=='N'&&!target.some(u=>type(u)==='F');
+        if(!(original&&shipArtillery)&&blocked(board,path,unit,from,capture,original))continue;
         // A carrier's base moves the entire stack. Passengers may disembark separately.
         const cargo=unitIndex===0?units.slice(1):[],movers=[unit,...cargo];
         if(friendly){
@@ -87,11 +98,12 @@ function rawMoves(board,side){
         }else if(t==='E'&&cargo.length){
           if(dc!==0||distance!==1||![5,6].includes(row(from))||row(to)!==11-row(from))continue;
         }else if(t!=='F'){
-          if(capture&&!land(to)){
+          if(capture&&(!land(to)||original&&type(target[0])==='N')){
+            if(original&&type(target[0])!=='N')continue;
             moves.push({from,to,action:`ctl-${unitIndex}-fire`});continue;
           }
           if(!path.every(land))continue;
-          if(heavy(t)&&!capture&&crossesDeep(path,from))continue;
+          if(heavy(t)&&!capture&&crossesDeep(path,from,original))continue;
         }
         if(t==='F'){
           // A bombing run may return to its carrier/airport; an air-to-air capture must land.
@@ -105,11 +117,23 @@ function rawMoves(board,side){
   return moves;
 }
 function commanderAt(board,side){return board.findIndex(cell=>ctlUnits(cell).some(u=>u===side+'K'||u===side+'K*'));}
-export function commanderThreats(board,side){
+function aircraftStrike(from,to,capture,zones){
+  const path=route(from,to);
+  const intercepted=path.slice(0,-1).some(i=>zones.some(z=>inZone(i,z)&&!(capture&&inZone(to,z))));
+  const exchange=!intercepted&&zones.some(z=>inZone(to,z));
+  return {burnt:intercepted||exchange&&!capture,exchange};
+}
+export function commanderThreats(board,side,original=false){
   const king=commanderAt(board,side);if(king<0)return [];
-  return rawMoves(board,other(side)).filter(m=>m.to===king&&!m.action.endsWith('-board'));
+  const zones=original?airZones(board,side):[];
+  return rawMoves(board,other(side),original).filter(m=>{
+    if(m.to!==king||m.action.endsWith('-board'))return false;
+    const attacker=ctlUnits(board[m.from])[Number(m.action.split('-')[1])];
+    return !original||type(attacker)!=='F'||hero(attacker)||!aircraftStrike(m.from,king,true,zones).burnt;
+  });
 }
 export function commanderLegal(game){
+  if(game.rules===COMMANDER_RULE)return rawMoves(game.board,game.turn,true);
   return rawMoves(game.board,game.turn).filter(move=>{
     const unit=ctlUnits(game.board[move.from])[Number(move.action.split('-')[1])];
     if(type(unit)!=='K'||move.action.endsWith('-board'))return true;
@@ -127,12 +151,15 @@ function promoteLast(board){
 }
 export function commanderMove(game,request){
   const legal=commanderLegal(game),{from,to}=request;
+  const originalRules=game.rules===COMMANDER_RULE;
+  const capturePoints=unit=>originalRules&&type(unit)==='K'?0:CTL_VALUES[type(unit)]+(hero(unit)?10:0);
   let orders;
   if(request.action==='ctl-combined'){
     const incoming=request.details?.orders;
     if(!Array.isArray(incoming)||incoming.length<2||incoming.length>3||incoming.some(o=>!o||!Number.isInteger(o.unit)||!Number.isInteger(o.to)||typeof o.mode!=='string'))return null;
     orders=incoming.map(o=>({unit:o.unit,to:o.to,mode:o.mode}));
     if(to!==orders[0].to||new Set(orders.map(o=>o.unit)).size!==orders.length||new Set(orders.map(o=>o.to)).size!==orders.length)return null;
+    if(originalRules&&new Set(orders.map(o=>`${Math.sign(row(o.to)-row(from))},${Math.sign(col(o.to)-col(from))}`)).size!==orders.length)return null;
   }else{const one=decode(request);if(!one)return null;orders=[one];}
   if(request.promotion||request.pass||orders.some(o=>!legal.some(m=>m.from===from&&m.to===o.to&&m.action===`ctl-${o.unit}-${o.mode}`)))return null;
   const original=game.board,units=ctlUnits(original[from]),side=game.turn,enemy=other(side);
@@ -150,16 +177,13 @@ export function commanderMove(game,request){
     const target=ctlUnits(original[dest]),capture=target.length&&target[0][0]===enemy;
     let burnt=false,exchange=false;
     if(t==='F'&&!hero(unit)){
-      const path=route(from,dest);
-      burnt=path.slice(0,-1).some(i=>zones.some(z=>inZone(i,z)&&!(capture&&inZone(dest,z))));
-      if(!burnt)exchange=zones.some(z=>inZone(dest,z));
-      if(exchange&&!capture)burnt=true;
+      ({burnt,exchange}=aircraftStrike(from,dest,capture,zones));
     }
     if(capture&&!burnt){
-      captures.push(dest);points+=target.reduce((n,u)=>n+(CTL_VALUES[type(u)]||0)+(hero(u)?10:0),0);next[dest]=null;
+      captures.push(dest);points+=target.reduce((n,u)=>n+capturePoints(u),0);next[dest]=null;
     }
     if(burnt||exchange){
-      destroyed.push(...moving);enemyPoints+=moving.reduce((n,u)=>n+(CTL_VALUES[type(u)]||0)+(hero(u)?10:0),0);
+      destroyed.push(...moving);enemyPoints+=moving.reduce((n,u)=>n+capturePoints(u),0);
       effects.push({from,to:dest,unit,mode,burnt:true});continue;
     }
     if(mode==='bomb'||mode==='fire'){
@@ -189,17 +213,22 @@ export function commanderMove(game,request){
     if(stack[pending.slot]===pending.unit&&!hero(pending.unit)){stack[pending.slot]+='*';next[pending.index]=pack(stack);}
   }
   promoteLast(next);
-  const pending=commanderThreats(next,enemy).map(m=>{const slot=+m.action.split('-')[1];return {against:enemy,index:m.from,slot,unit:ctlUnits(next[m.from])[slot]};});
+  const pending=commanderThreats(next,enemy,originalRules).map(m=>{const slot=+m.action.split('-')[1];return {against:enemy,index:m.from,slot,unit:ctlUnits(next[m.from])[slot]};});
   game.commander={scores:{r:game.commander?.scores?.r||0,b:game.commander?.scores?.b||0},pending};
   game.commander.scores[side]+=points;game.commander.scores[enemy]+=enemyPoints;
   game.board=next;game.turn=enemy;game.noCapture=captures.length||destroyed.length?0:(game.noCapture||0)+1;
-  game.check=commanderThreats(next,enemy).length>0;game.checkSquare=game.check?commanderAt(next,enemy):null;
+  game.check=pending.length>0;game.checkSquare=game.check?commanderAt(next,enemy):null;
   const alive=commanderAt(next,side)>=0,enemyAlive=commanderAt(next,enemy)>=0;
   let result=!alive||!enemyAlive?{winner:alive?side:enemyAlive?enemy:null,reason:'commander-captured',line:captures}:null;
-  if(!result&&game.noCapture>=120)result={winner:null,reason:'no-capture',line:[]};
-  if(!result&&!commanderLegal(game).length)result={winner:side,reason:'no-moves',line:[]};
+  if(originalRules&&result?.winner)game.commander.scores[result.winner]+=100;
+  if(!originalRules&&!result&&game.noCapture>=120)result={winner:null,reason:'no-capture',line:[]};
+  if(!originalRules&&!result&&!commanderLegal(game).length)result={winner:side,reason:'no-moves',line:[]};
   const verbs={move:'→',board:'lên',bomb:'ném bom',fire:'bắn'};
-  return {result,captures,destroyed,effects,label:orders.map(o=>`${units[o.unit]} ${ctlCoordinate(from)} ${verbs[o.mode]} ${ctlCoordinate(o.to)}`).join(' · ')};
+  return {result,captures,destroyed,effects,label:orders.map(o=>{
+    const unit=units[o.unit];
+    const symbol=originalRules?notation[type(unit)]+(hero(unit)?'*':''):unit;
+    return `${symbol} ${ctlCoordinate(from)} ${verbs[o.mode]} ${ctlCoordinate(o.to)}`;
+  }).join(' · ')};
 }
 export function chooseCommander(game){
   const moves=commanderLegal(game);if(!moves.length)return null;
@@ -218,7 +247,7 @@ export function chooseCommander(game){
     let value=score;
     if(out.result)value=out.result.winner===side?1e7:out.result.winner?-1e7:0;
     else{
-      const replies=rawMoves(copy.board,copy.turn);
+      const replies=rawMoves(copy.board,copy.turn,game.rules===COMMANDER_RULE);
       let danger=0;for(const reply of replies){const targets=ctlUnits(copy.board[reply.to]);if(targets[0]?.[0]===side)danger=Math.max(danger,targets.reduce((n,u)=>n+(CTL_VALUES[type(u)]||0),0));}
       value-=danger*(game.difficulty==='easy'?1:8);
       if(out.destroyed.length)value-=out.destroyed.reduce((n,u)=>n+CTL_VALUES[type(u)],0)*12;

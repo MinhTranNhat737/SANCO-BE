@@ -1,5 +1,5 @@
 import {ABSTRACT_KINDS,abstractInitial,abstractLegal,abstractMove} from './abstract-games.js';
-import {initialCommander,commanderLegal,commanderMove} from './commander.js';
+import {COMMANDER_RULE,initialCommander,commanderLegal,commanderMove} from './commander.js';
 import { Chess, DEFAULT_POSITION } from 'chess.js';
 import { GameError, winningLine, coordinate } from './game.js';
 import { initialXiangqi, xLegal, xInCheck, xOther } from './xiangqi.js';
@@ -25,7 +25,7 @@ export function createPractice(kind, humanSide, difficulty, id) {
     moves: [], result: null, check: false, checkSquare: null, createdAt: Date.now(), noCapture: 0, repetitions: {},
     ...(chess ? { fen: DEFAULT_POSITION } : {}) };
   game.initialBoard = [...game.board]; game.repetitions[positionKey(game)]=1;
-  if(kind==='commander'){game.commander={scores:{r:0,b:0},pending:[]};game.rules='commander-total-v1';}
+  if(kind==='commander'){game.commander={scores:{r:0,b:0},pending:[]};game.rules=COMMANDER_RULE;}
   if(kind==='go'){game.seenPositions={[game.board.map(v=>v||'.').join('')]:true};game.passes=0;game.prisoners={B:0,W:0};}
   if(PARTY_KINDS.includes(kind)){game.party=newParty(kind);game.initialParty=structuredClone(game.party);if(kind==='monopoly')game.rules='monopoly-vn-v2';}
   return game;
@@ -51,10 +51,12 @@ export function makePracticeMove(game, request, now=Date.now()) {
     const side=game.turn,piece=game.board[from],out=commanderMove(game,request);
     if(!out)throw new GameError('Lệnh không hợp lệ. Chọn quân và mục tiêu được đánh dấu.');
     if(out.result)endPractice(game,out.result.winner,out.result.reason,now,out.result.line);
-    const key=positionKey(game);game.repetitions[key]=(game.repetitions[key]||0)+1;
-    if(game.phase==='playing'&&game.repetitions[key]>=3)endPractice(game,null,'repetition',now);
     game.moves.push({from,to,side,piece,captured:null,action:request.action,details:request.details,label:out.label,at:now,board:[...game.board],check:game.check,checkSquare:game.checkSquare,captures:out.captures,effects:out.effects,commander:structuredClone(game.commander)});
-    if(game.phase==='playing'&&game.moves.length>=1000)endPractice(game,null,'move-limit',now);
+    if(game.rules!==COMMANDER_RULE){
+      const key=positionKey(game);game.repetitions[key]=(game.repetitions[key]||0)+1;
+      if(game.phase==='playing'&&game.repetitions[key]>=3)endPractice(game,null,'repetition',now);
+      if(game.phase==='playing'&&game.moves.length>=1000)endPractice(game,null,'move-limit',now);
+    }
     return game;
   }
   if(ABSTRACT_KINDS.includes(game.kind)){
@@ -131,6 +133,11 @@ export function undoHumanTurn(game) {
   const index=game.moves.findLastIndex(move=>move.side===game.humanSide);
   if(index<0)throw new GameError('Bạn chưa có nước đi nào để đi lại.');
   const restored=createPractice(game.kind,game.humanSide,game.difficulty,game.id);
+  if(game.kind==='commander'){
+    restored.rules=game.rules;
+    if(game.initialBoard){restored.initialBoard=[...game.initialBoard];restored.board=[...game.initialBoard];}
+    restored.repetitions={[positionKey(restored)]:1};
+  }
   for(const move of game.moves.slice(0,index))makePracticeMove(restored,move,move.at);
   restored.createdAt=game.createdAt;restored.version=game.version;
   return restored;

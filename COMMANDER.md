@@ -6,10 +6,12 @@ Migration `007_commander.sql` mở rộng loại ván; không thêm dữ liệu 
 
 ## Hồ sơ luật
 
-Áp dụng **tổng lực, dàn quân sẵn**, kết thúc khi Tư lệnh bị diệt; không phải
-bản hải chiến/không chiến hay bản tự bố trí đội hình. Đỏ đi trước theo quy ước
-của ứng dụng. Bàn 11 cột × 12 hàng; tọa độ ghi hàng trước, cột sau, gốc 0,0
-ở góc dưới trái phía Đỏ. Hai bên có cùng 19 quân, bố trí đối xứng theo hàng.
+Ván online mới áp dụng **Tổng lực, dàn quân sẵn** theo tài liệu công bố năm
+2017 của Nguyễn Quý Hải. Ván kết thúc khi Tư lệnh bị diệt hoặc sau 30 phút
+cho cả hai bên. Hết giờ thì so điểm ăn quân, bằng điểm thì hòa. Đỏ đi trước
+theo quy ước của ứng dụng. Bàn 11 cột × 12 hàng; tọa độ ghi hàng trước, cột
+sau, gốc 0,0 ở góc dưới trái phía Đỏ. Mỗi bên có 19 quân thuộc 11 loại, đặt
+theo Hình 3 của tài liệu. Chơi với máy dùng chế độ luyện tập không tính giờ.
 
 Quân được lưu thành chuỗi có màu và loại: `rK`, `bN`; tổ hợp dạng
 `rN+rF+rK`, quân anh hùng thêm `*`. Máy chủ xác nhận toàn bộ lệnh trước khi
@@ -35,22 +37,23 @@ ném bom là những lựa chọn tách biệt, không suy diễn từ ô đích
   Đánh mục tiêu trong vùng bảo vệ thì một đổi một. Máy bay anh hùng miễn
   phòng không. Máy bay chỉ dừng trên đất liền hoặc lên tàu; có thể ném bom
   mục tiêu trên biển rồi trở về. Tổ hợp trên máy bay bị diệt cùng máy bay.
-- Tư lệnh đi bộ không được xuyên giao điểm bị kiểm soát. Tư lệnh lộ mặt
-  có thể bị Tư lệnh đối phương bắt theo trục thoáng. Quân chở/công sự che
-  Tư lệnh. Ứng dụng cảnh báo nguy hiểm, không bắt buộc đáp chiếu và không
-  tự xử chiếu hết; đối phương có thể bắt Tư lệnh nếu người chơi bỏ qua.
+- Tư lệnh đi dọc, ngang trên đường thoáng và thường chỉ ăn trong một đoạn.
+  Tư lệnh lộ mặt có thể bị Tư lệnh đối phương bắt theo trục thoáng. Quân
+  chở và công sự che Tư lệnh. Ván Tổng lực kết thúc khi Tư lệnh bị bắt.
 - Quân trực tiếp chiếu được phong anh hùng sau khi Tư lệnh bị đe dọa thực
   sự đổi giao điểm. Quân chiến đấu cuối cùng, không tính Tư lệnh/công sự,
   cũng được phong. Anh hùng thêm một bước và có hướng chéo.
-- Nếu một đổi một diệt cả hai Tư lệnh trong cùng lệnh thì hòa. Hết nước
-  thì thua. Lặp thế ba lần, 120 lượt không ăn hoặc 1.000 lượt thì hòa theo
-  quy ước của Sân Cờ. Đồng hồ phòng dùng thời gian mỗi bên đã chọn và xử
-  thua khi hết giờ; chưa dùng tính điểm kết thúc trận 30 phút.
+- Nếu một đổi một diệt cả hai Tư lệnh thì hòa. Ván mới dùng điểm ăn quân
+  theo loại quân và cộng 10 điểm cho quân anh hùng bị ăn. Bên thắng bằng
+  diệt Tư lệnh được cộng 100 điểm chiến thuật.
+- Phòng và ván luyện tập đã tạo theo hồ sơ cũ tiếp tục dùng luật lưu trong
+  ván. Ván đấu lại chuyển sang hồ sơ Tổng lực mới.
 
-Đây là hồ sơ luật chơi trong ứng dụng, không tuyên bố là bộ luật trọng tài
-cho mọi giải. Chưa có dàn quân tự chọn hoặc các mục tiêu hải chiến/không chiến.
-Giao diện 2D/3D có sáng/tối, đế quân vuông, tọa độ, vùng phòng không,
-chọn khách trên lưng, lập lệnh phối hợp và bảng tra 11 loại quân.
+Trang hiện triển khai một ván Tổng lực. Thể thức thi nhiều lượt, dàn quân
+tự chọn, hải chiến và không chiến nằm ngoài chế độ này. Giao diện 2D/3D
+có sáng/tối, tọa độ, vùng phòng không, chọn quân trên lưng, lập lệnh phối
+hợp và bảng tra 11 loại quân. Ký hiệu ghi nước đi theo Hình 2. Hình minh
+họa quân là bản vẽ riêng của Sân Cờ.
 
 ## Bàn 3D
 
