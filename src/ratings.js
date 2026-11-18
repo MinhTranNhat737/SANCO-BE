@@ -29,8 +29,8 @@ export function botRoster(kind){validKind(kind);return BOT_NAMES.map((name,index
 export function selectBot(kind,elo,id){
   const roster=botRoster(kind);
   if(id){const bot=roster.find(item=>item.id===id);if(!bot)throw new GameError('Bot không hợp lệ cho môn cờ này.');return bot;}
-  const nearest=[...roster].sort((a,b)=>Math.abs(a.elo-elo)-Math.abs(b.elo-elo)).slice(0,3);
-  return nearest[randomInt(nearest.length)];
+  const nearest=[...roster].sort((a,b)=>Math.abs(a.elo-elo)-Math.abs(b.elo-elo));
+  return nearest[0];
 }
 export async function playerRatings(db,playerId){
   const {rows}=await db.query('SELECT * FROM player_ratings WHERE player_id=$1',[playerId]);
