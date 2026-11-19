@@ -16,7 +16,7 @@ export const SAFE_LUDO=[0,8,13,21,26,34,39,47];
 export const estateCells=Array.from({length:20},(_,i)=>({index:i,name:['Xuất phát','Sen','Trúc','Cơ hội','Mai','Thuế','Đào','Lan','Cơ hội','Cúc','Thăm tù','Sông','Núi','Cơ hội','Biển','Nghỉ chân','Mây','Gió','Cơ hội','Trăng'][i],type:i===0?'start':i===5?'tax':i===10?'jail':i===15?'rest':[3,8,13,18].includes(i)?'chance':'property',price:100+i*20,group:Math.floor((i%5)/2)+Math.floor(i/5)*2}));
 // Property groups pair adjacent property spaces on the ring, independent of corners/events.
 estateCells.filter(c=>c.type==='property').forEach((c,i)=>c.group=Math.floor(i/2));
-export function newParty(kind,count=2,legacy=false){if(kind==='monopoly'&&!legacy)return newVietnam(count);return {sides:PARTY_SIDES.slice(0,count),players:PARTY_SIDES.slice(0,count).map(side=>({side,active:true,tokens:[-1,-1,-1,-1],position:0,cash:1500,jail:0})),stage:'roll',dice:null,rolls:0,round:1,property:Array(20).fill(null),houses:Array(20).fill(0),message:'',debt:null};}
+export function newParty(kind,count=2,legacy=false,estateMode,seatSides){if(kind==='monopoly'&&!legacy)return newVietnam(count,estateMode,seatSides);return {sides:PARTY_SIDES.slice(0,count),players:PARTY_SIDES.slice(0,count).map(side=>({side,active:true,tokens:[-1,-1,-1,-1],position:0,cash:1500,jail:0})),stage:'roll',dice:null,rolls:0,round:1,property:Array(20).fill(null),houses:Array(20).fill(0),message:'',debt:null};}
 const current=game=>game.party.players.find(p=>p.side===game.turn);
 function finish(game,winner,reason){game.phase='finished';game.result={winner,reason,line:[],at:Date.now()};}
 export function nextPartyTurn(game){

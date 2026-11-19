@@ -4,6 +4,7 @@ import { COMMANDER_DURATION_MS } from './commander.js';
 import {PARTY_KINDS,PARTY_SIDES,MONOPOLY_SIDES} from './party-games.js';
 import { digest, secret } from './auth.js';
 import {settleRating} from './ratings.js';
+import {validateEstateMode} from './estate-modes.js';
 
 export const ROOM_INACTIVITY_MS = 5 * 60 * 1000;
 const hasProtectedClock = room => room.game.phase==='playing'&&(room.ranked||room.game.matchDeadline!=null);
@@ -127,9 +128,11 @@ export class RoomService {
     if (changed) this.changed(room); else this.schedule(room);
     return room;
   }
-  async create(user, minutes, kind='caro', side='random', capacity=2, ranked=false) {
+  async create(user, minutes, kind='caro', side='random', capacity=2, ranked=false,estateMode) {
     if(typeof ranked!=='boolean')throw new GameError('Chế độ xếp hạng không hợp lệ.');
     if(!KINDS.includes(kind))throw new GameError('Môn cờ không hợp lệ.');
+    if(kind==='monopoly')validateEstateMode(estateMode);
+    else if(estateMode!==undefined)throw new GameError('Chế độ địa ốc chỉ dùng cho Tỷ phú.');
     if(!['first','second','random'].includes(side))throw new GameError('Bên quân không hợp lệ.');
     const maxCapacity=kind==='monopoly'?8:PARTY_KINDS.includes(kind)?4:2;
     if(!Number.isInteger(capacity)||capacity<2||capacity>maxCapacity)throw new GameError('Số người không hợp lệ.');
@@ -147,7 +150,7 @@ export class RoomService {
       const id = randomBytes(4).toString('hex').toUpperCase();
       const room = { id, kind, ranked, version: 0, duration: minutes * 60000, createdAt: now, updatedAt: now,
         owner: { id: user.id, name: user.display_name, mark, ready: false, rematch: false }, guest: null,
-        inviteHash: digest(token), inviteExpiresAt: now + 86400000, drawOffer: null, game: newGame(minutes * 60000, randomUUID(),kind,capacity) };
+        inviteHash: digest(token), inviteExpiresAt: now + 86400000, drawOffer: null,...(estateMode?{estateMode}:{}),game: newGame(minutes * 60000, randomUUID(),kind,capacity,estateMode) };
       if(PARTY_KINDS.includes(kind)){room.capacity=capacity;room.players=[room.owner];if(side==='random')room.randomSeats=true;}
       const out = await this.db.query('INSERT INTO rooms(id,owner_id,state,created_at,updated_at) VALUES($1,$2,$3,$4,$4) ON CONFLICT(id) DO NOTHING RETURNING id', [id, user.id, JSON.stringify(room), now]);
       if (out.rows.length) {

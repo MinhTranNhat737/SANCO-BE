@@ -6,6 +6,7 @@ import { initialXiangqi, xLegal, xInCheck, xOther } from './xiangqi.js';
 import {discKinds,initialDiscs,discLegal,playDisc} from './disc-games.js';
 import {GRID_KINDS,initialGrid,gridLegal,gridMove} from './grid-games.js';
 import {PARTY_KINDS,newParty,partyLegal,partyMove,PARTY_SIDES} from './party-games.js';
+import {startVietnam} from './vietnam-estate.js';
 
 export const KINDS = ['caro','chess','xiangqi','reversi','connect4','go','ludo','monopoly','checkers','tictactoe',...ABSTRACT_KINDS,'commander'];
 export const boardSide = (kind, first=true) => kind==='caro'||kind==='tictactoe' ? first?'X':'O' : kind==='chess' ? first?'w':'b' : kind==='breakthrough'?first?'W':'B':ABSTRACT_KINDS.includes(kind)?first?'B':'W': ['reversi','go','checkers'].includes(kind)?first?'B':'W':PARTY_KINDS.includes(kind)?first?'R':'G':kind==='connect4'?first?'R':'Y':first?'r':'b';
@@ -15,7 +16,7 @@ export const chessSquare = index => `${'abcdefgh'[index%8]}${8-Math.floor(index/
 export const xCoordinate = index => `${'ABCDEFGHI'[index%9]}${10-Math.floor(index/9)}`;
 export const chessBoard = chess => chess.board().flat().map(piece=>piece ? piece.color+piece.type.toUpperCase() : null);
 export const positionKey = game => game.kind==='chess' ? game.fen.split(' ').slice(0,4).join(' ') : game.board.map(p=>p||'.').join(game.kind==='commander'?'/':'')+game.turn+(game.kind==='coganh'?`:${game.forcedTo??''}`:game.kind==='commander'?JSON.stringify(game.commander?.pending||[]):'');
-export function createPractice(kind, humanSide, difficulty, id) {
+export function createPractice(kind, humanSide, difficulty, id,options={}) {
   if (!KINDS.includes(kind)) throw new GameError('Môn cờ không hợp lệ.');
   if (!['easy','medium','hard'].includes(difficulty)) throw new GameError('Độ khó không hợp lệ.');
   if (![boardSide(kind),boardSide(kind,false)].includes(humanSide)) throw new GameError('Bên quân không hợp lệ.');
@@ -27,7 +28,7 @@ export function createPractice(kind, humanSide, difficulty, id) {
   game.initialBoard = [...game.board]; game.repetitions[positionKey(game)]=1;
   if(kind==='commander'){game.commander={scores:{r:0,b:0},pending:[]};game.rules=COMMANDER_RULE;}
   if(kind==='go'){game.seenPositions={[game.board.map(v=>v||'.').join('')]:true};game.passes=0;game.prisoners={B:0,W:0};}
-  if(PARTY_KINDS.includes(kind)){game.party=newParty(kind);game.initialParty=structuredClone(game.party);if(kind==='monopoly')game.rules='monopoly-vn-v2';}
+  if(PARTY_KINDS.includes(kind)){game.party=newParty(kind,kind==='monopoly'?(options.capacity??2):2,false,options.estateMode);if(kind==='monopoly'){startVietnam(game);game.rules=game.party.profile?'monopoly-vn-v3':'monopoly-vn-v2';}game.initialParty=structuredClone(game.party);}
   return game;
 }
 export function legalMoves(game) {

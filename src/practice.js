@@ -86,6 +86,8 @@ export class PracticeService {
   async create(player,body){
     const {kind,difficulty='medium',side='first'}=body;
     if(body.ranked!==undefined&&typeof body.ranked!=='boolean')throw new GameError('Chế độ xếp hạng không hợp lệ.');
+    if(kind!=='monopoly'&&body.estateMode!==undefined)throw new GameError('Chế độ địa ốc chỉ dùng cho Tỷ phú.');
+    if(kind==='monopoly'&&body.ranked&&(body.capacity??2)!==2)throw new GameError('Luyện tập xếp hạng chỉ hỗ trợ 2 người.');
     if(!['first','second','random'].includes(side))throw new GameError('Bên quân không hợp lệ.');
     await this.pruneInactive();
     const game=await this.db.transaction(async client=>{
@@ -97,7 +99,7 @@ export class PracticeService {
     const rating=body.ranked?(await playerRatings(client,player.id))[kind]:null;
     const bot=body.ranked?selectBot(kind,rating?.elo,body.botId):null;
     const humanSide=boardSide(kind,side==='random'||body.ranked?!!randomInt(2):side==='first');
-    const game=createPractice(kind,humanSide,bot?.difficulty||difficulty,randomUUID());
+    const game=createPractice(kind,humanSide,bot?.difficulty||difficulty,randomUUID(),{estateMode:body.estateMode,capacity:body.capacity});
     if(bot){game.ranked=true;game.bot=bot;game.playerElo=rating.elo;}
     const {rows}=await client.query("SELECT count(*)::int AS n FROM practice_games WHERE player_id=$1 AND created_at>$2",[player.id,Date.now()-3600000]);
     if(rows[0].n>=40)throw new GameError('Bạn đã tạo nhiều ván. Hãy tiếp tục một ván đang có.',429);

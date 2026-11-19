@@ -144,7 +144,7 @@ export async function createApplication(options = {}) {
     res.json({ticket:await matchmaking.update(req.user,action,action==='search'?{kind,preset}:undefined)});
   });
   app.get('/api/bots/:kind',required,async(req,res)=>res.json({bots:botRoster(req.params.kind)}));
-  app.post('/api/rooms', required, requireAccount, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity,req.body.ranked)));
+  app.post('/api/rooms', required, requireAccount, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity,req.body.ranked,req.body.estateMode)));
   app.get('/api/rooms/:id', required, async (req, res) => res.json({ room: await rooms.get(req.params.id, req.user.id) }));
   app.post('/api/rooms/:id/join', required, rate('join', 40, 60000), async (req, res) => res.json({ room: await rooms.join(req.params.id, req.user, req.body.token) }));
   app.post('/api/rooms/:id/invite', required, rate('invite', 15, 60000), async (req, res) => res.json(await rooms.invite(req.params.id, req.user.id)));

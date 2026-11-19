@@ -1,23 +1,31 @@
 import * as caro from './game.js';
 import {KINDS,boardSide,oppositeSide,createPractice,legalMoves,makePracticeMove} from './practice-engine.js';
 import {PARTY_KINDS,newParty,eliminateParty} from './party-games.js';
-import {timeoutVietnamTurn} from './vietnam-estate.js';
+import {timeoutVietnamTurn,startVietnam} from './vietnam-estate.js';
 import {COMMANDER_RULE,COMMANDER_DURATION_MS} from './commander.js';
 export const MONOPOLY_TURN_MS=30_000;
 export const {GameError}=caro;
 export const seats=room=>room.players||[room.owner,room.guest].filter(Boolean);
 export function seatOf(room,actor){const me=seats(room).find(s=>s.id===actor);if(!me)throw new GameError('Bạn chưa có quyền vào phòng này. Hãy mở liên kết mời.',403);return me;}
 export const other=(side,kind='caro')=>oppositeSide(kind,side);
-export function newGame(duration,id,kind='caro',count=2){
+export function newGame(duration,id,kind='caro',count=2,estateMode,seatSides){
   if(kind==='caro')return caro.newGame(duration,id);
   const g=createPractice(kind,boardSide(kind),'medium',id);
-  if(PARTY_KINDS.includes(kind)){g.party=newParty(kind,count);g.initialParty=structuredClone(g.party);}
+  if(PARTY_KINDS.includes(kind)){g.party=newParty(kind,count,false,estateMode,seatSides);g.turn=g.party.sides[0];g.initialParty=structuredClone(g.party);}
   return {...g,phase:'waiting',rules:kind==='commander'?COMMANDER_RULE:kind==='monopoly'?'monopoly-room-vn-v2':`${kind}-room-v1`,remaining:Object.fromEntries((g.party?.sides||[boardSide(kind),boardSide(kind,false)]).map(side=>[side,duration])),turnStartedAt:null,...(kind==='monopoly'?{turnLimitMs:MONOPOLY_TURN_MS,turnDeadline:null}:{})};
 }
 export function startRoomGame(game,now){
+  if(game.party?.profile){startVietnam(game);game.initialParty=structuredClone(game.party);}
   game.phase='playing';game.turnStartedAt=now;
   if(game.rules===COMMANDER_RULE)game.matchDeadline=now+COMMANDER_DURATION_MS;
   if(game.turnLimitMs)game.turnDeadline=now+game.turnLimitMs;
+}
+function beginRoom(room,now){
+  if(room.kind==='monopoly'){
+    const participants=seats(room);
+    Object.assign(room.game,newGame(room.duration,room.game.id,room.kind,participants.length,room.estateMode,participants.map(seat=>seat.mark)));
+  }
+  startRoomGame(room.game,now);
 }
 export function clockDeadline(game){
   if(game.phase!=='playing'||game.turnStartedAt===null)return null;
@@ -50,7 +58,12 @@ export function applyAction(room,actor,action,data,now,nextGameId){
   const me=seatOf(room,actor),g=room.game;
   if(action==='ready'){
     if(g.phase!=='waiting')throw new GameError('Ván đã bắt đầu.',409);
-    me.ready=!me.ready;if(seats(room).length===(room.capacity||2)&&seats(room).every(s=>s.ready))startRoomGame(g,now);return;
+    me.ready=!me.ready;if(seats(room).length===(room.capacity||2)&&seats(room).every(s=>s.ready))beginRoom(room,now);return;
+  }
+  if(action==='start'){
+    if(room.kind!=='monopoly'||room.owner.id!==actor)throw new GameError('Chỉ chủ phòng Tỷ phú được bắt đầu sớm.',403);
+    if(g.phase!=='waiting'||seats(room).length<2||!seats(room).every(seat=>seat.ready))throw new GameError('Cần ít nhất 2 người và tất cả đã sẵn sàng.',409);
+    beginRoom(room,now);return;
   }
   if(action==='rematch'){
     if(g.phase!=='finished')throw new GameError('Chờ ván hiện tại kết thúc.',409);
@@ -58,7 +71,7 @@ export function applyAction(room,actor,action,data,now,nextGameId){
     if(seats(room).length>1&&seats(room).every(s=>s.rematch)){
       for(const s of seats(room)){s.mark=g.party?g.party.sides[(g.party.sides.indexOf(s.mark)+1)%g.party.sides.length]:other(s.mark,room.kind);s.ready=false;s.rematch=false;}
       if(room.kind==='commander')room.duration=COMMANDER_DURATION_MS;
-      room.drawOffer=null;room.game=newGame(room.duration,nextGameId,room.kind,room.capacity);
+      room.drawOffer=null;room.game=newGame(room.duration,nextGameId,room.kind,room.kind==='monopoly'?seats(room).length:room.capacity,room.estateMode,room.kind==='monopoly'?seats(room).map(seat=>seat.mark):undefined);
     }return;
   }
   if(g.phase!=='playing')throw new GameError('Ván chưa bắt đầu hoặc đã kết thúc.',409);
@@ -99,6 +112,6 @@ export function publicRoom(room,actor,now,online,summary=false){
   if(summary)return {...view,kind,summary:true,game:room.game};
   if(kind==='caro')return {...view,kind,game:{...view.game,ratingChanges:room.game.ratingChanges}};
   const {repetitions,seenPositions,humanSide,difficulty,...game}=room.game;
-  return {...view,kind,game:{...game,legal:game.phase==='playing'&&game.turn===view.me.mark?legalMoves(room.game):[]}};
+  return {...view,kind,...(room.estateMode?{estateMode:room.estateMode}:{}),game:{...game,legal:game.phase==='playing'&&game.turn===view.me.mark?legalMoves(room.game):[]}};
 }
 export {KINDS,boardSide};
