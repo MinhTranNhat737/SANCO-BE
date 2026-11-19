@@ -126,6 +126,27 @@ export function eliminateVietnam(g,side,reason='resign'){const p=g.party,me=play
   if(p.auction){if(p.auction.leader===side){p.auction.leader=null;p.auction.bid=0;}if(!p.auction.passed.includes(side))p.auction.passed.push(side);if(g.turn===side)nextAuction(g);return;}
   if(g.turn===side)nextTurn(g);
 }
+export function timeoutVietnamTurn(g){
+  const p=g.party,me=player(g);if(!me?.active)return;
+  if(p.stage==='auction'&&p.auction){
+    p.auction.passed.push(me.side);
+    (p.auction.history||=[]).push({side:me.side,action:'pass',at:Date.now()});
+    ledger(g,'timeout',`${me.side} hết 30s · Tự động bỏ qua đấu giá`);
+    nextAuction(g);
+    return;
+  }
+  if(p.stage==='deal'&&p.pending){
+    ledger(g,'timeout',`${me.side} hết 30s · Tự động từ chối đề nghị #${p.pending.id}`);
+    resumeDeal(g);
+    return;
+  }
+  if(p.stage==='debt'){
+    eliminateVietnam(g,me.side,'timeout');
+    return;
+  }
+  ledger(g,'timeout',`${me.side} hết 30s · Tự động qua lượt`);
+  nextTurn(g);
+}
 export function chooseVietnam(g){const opts=vietnamLegal(g),p=g.party,me=player(g);if(!opts.length)return null;const find=a=>opts.find(m=>m.action===a);if(find('accept')){const d=p.pending;let fair=false;try{validateOffer(g,d);fair=d.kind==='loan'?d.interest<=10&&d.term>=2:d.pay+d.take.reduce((s,i)=>s+(VN_CELLS[i].price||0),0)>=d.ask+d.give.reduce((s,i)=>s+(VN_CELLS[i].price||0),0); // Recomputed below from the receiver's perspective.
     if(d.kind==='trade')fair=d.pay+d.give.reduce((s,i)=>s+VN_CELLS[i].price,0)>=d.ask+d.take.reduce((s,i)=>s+VN_CELLS[i].price,0);
   }catch{}return find(fair?'accept':'reject');}

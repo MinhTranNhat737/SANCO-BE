@@ -6,6 +6,7 @@ import {VN_CELLS,vietnamLegal,vietnamMove,vietnamRent,eliminateVietnam,chooseVie
 import {openDatabase} from '../src/database.js';
 import {createGuest} from '../src/auth.js';
 import {RoomService} from '../src/rooms.js';
+import {MONOPOLY_TURN_MS,newGame,startRoomGame,clockDeadline,settleTimeout} from '../src/room-game.js';
 const create=()=>createPractice('monopoly','R','medium',randomUUID());
 const move=(g,action,to=-1,details={})=>vietnamMove(g,{action,to,from:null,details},()=>1);
 
@@ -137,4 +138,26 @@ test('Chance/community cards, tax, jail, rent and cash deductions emit structure
   const seq3=[1,2];
   vietnamMove(g,{action:'roll',to:-1},()=>seq3.shift()||1);
   assert.ok(p.events.some(e=>e.type==='jail'&&e.side==='R'&&e.reason.includes('Trại giam')));
+});
+test('Monopoly rooms enforce a 30-second max turn limit and auto-advance on expiry',()=>{
+  const t0=1_000_000;
+  const game=newGame(60*60_000,'turn-cap-test','monopoly',3);
+  const room={kind:'monopoly',game};
+  startRoomGame(game,t0);
+  assert.equal(game.turnLimitMs,30_000);
+  assert.equal(MONOPOLY_TURN_MS,30_000);
+  assert.equal(clockDeadline(game),t0+30_000);
+  assert.equal(settleTimeout(room,t0+29_999),false);
+  assert.equal(settleTimeout(room,t0+30_000),true);
+  assert.equal(game.phase,'playing');
+  assert.equal(game.turn,'G');
+  assert.equal(game.turnDeadline,t0+60_000);
+
+  // Auction turn timeout auto-passes bidder
+  game.party.players[1].position=1;game.party.stage='buy';
+  vietnamMove(game,{action:'auction',to:-1},()=>1);
+  assert.equal(game.turn,'Y');
+  game.turnDeadline=t0+90_000;
+  assert.equal(settleTimeout(room,t0+90_000),true);
+  assert.ok(game.party.auction.passed.includes('Y'));
 });

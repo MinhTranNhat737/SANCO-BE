@@ -247,7 +247,7 @@ export class RoomService {
       return room;
     });
     this.changed(room);
-    if (stale) throw new GameError('Ván đã kết thúc vì hết giờ.', 409);
+    if (stale) throw new GameError(room.game.phase==='finished'?'Ván đã kết thúc vì hết giờ.':'Đã hết 30 giây lượt của bạn.', 409);
     return this.view(room, actor);
   }
   async mine(actor,summary=false) {
