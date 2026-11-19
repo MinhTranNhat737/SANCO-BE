@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {createPractice,makePracticeMove} from '../src/practice-engine.js';
 import {VN_CELLS,vietnamLegal,vietnamMove,vietnamRent,eliminateVietnam,chooseVietnam} from '../src/vietnam-estate.js';
+import {openDatabase} from '../src/database.js';
+import {createGuest} from '../src/auth.js';
+import {RoomService} from '../src/rooms.js';
 const create=()=>createPractice('monopoly','R','medium',randomUUID());
 const move=(g,action,to=-1,details={})=>vietnamMove(g,{action,to,from:null,details},()=>1);
 
@@ -56,4 +59,24 @@ test('Resignation cancels pending contracts without giving money and redirects i
 });
 test('Bot evaluates received trades and produces server-validated bids',()=>{
   const g=create();move(g,'offer',-1,{partner:'G',pay:100,ask:0,give:[],take:[]});const answer=chooseVietnam(g);assert.equal(answer.action,'accept');makePracticeMove(g,answer);assert.equal(g.turn,'R');
+});
+test('Monopoly rooms support up to 8 players with unique sides and default to casual mode',async()=>{
+  const db=await openDatabase({memory:true}),rooms=new RoomService(db);
+  try{
+    const users=await Promise.all(Array.from({length:8},()=>createGuest(db)));
+    const created=await rooms.create(users[0],60,'monopoly','first',8);
+    assert.equal(created.room.ranked,false);
+    assert.equal(created.room.capacity,8);
+    assert.deepEqual(created.room.game.party.sides,['R','G','Y','B','P','O','C','K']);
+    assert.equal(created.room.game.party.bank.houses,96);
+    for(let i=1;i<8;i++)await rooms.join(created.room.id,users[i],created.token);
+    let room=await rooms.get(created.room.id,users[0].id);
+    assert.equal(room.players.length,8);
+    assert.deepEqual(room.players.map(p=>p.mark),['R','G','Y','B','P','O','C','K']);
+    for(const u of users)room=await rooms.act(room.id,u.id,{actionId:randomUUID(),version:room.version,action:'ready'});
+    assert.equal(room.game.phase,'playing');
+    assert.equal(room.game.turn,'R');
+    await assert.rejects(()=>rooms.create(users[0],60,'monopoly','first',9),/Số người không hợp lệ/);
+    await assert.rejects(()=>rooms.create(users[0],5,'ludo','first',5),/Số người không hợp lệ/);
+  }finally{rooms.close();await db.close();}
 });

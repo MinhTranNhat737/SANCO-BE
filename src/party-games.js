@@ -2,6 +2,7 @@ import {randomInt} from 'node:crypto';
 import {newVietnam,vietnamLegal,vietnamMove,chooseVietnam,eliminateVietnam,vietnamWealth,VN_EDITION} from './vietnam-estate.js';
 export const PARTY_KINDS=['ludo','monopoly'];
 export const PARTY_SIDES=['R','G','Y','B'];
+export const MONOPOLY_SIDES=['R','G','Y','B','P','O','C','K'];
 export const SAFE_LUDO=[0,8,13,21,26,34,39,47];
 export const estateCells=Array.from({length:20},(_,i)=>({index:i,name:['Xuất phát','Sen','Trúc','Cơ hội','Mai','Thuế','Đào','Lan','Cơ hội','Cúc','Thăm tù','Sông','Núi','Cơ hội','Biển','Nghỉ chân','Mây','Gió','Cơ hội','Trăng'][i],type:i===0?'start':i===5?'tax':i===10?'jail':i===15?'rest':[3,8,13,18].includes(i)?'chance':'property',price:100+i*20,group:Math.floor((i%5)/2)+Math.floor(i/5)*2}));
 // Property groups pair adjacent property spaces on the ring, independent of corners/events.

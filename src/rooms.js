@@ -1,7 +1,7 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { GameError, newGame, other, applyAction, settleTimeout, seatOf, publicRoom, KINDS, boardSide, seats, clockDeadline, startRoomGame } from './room-game.js';
 import { COMMANDER_DURATION_MS } from './commander.js';
-import {PARTY_KINDS,PARTY_SIDES} from './party-games.js';
+import {PARTY_KINDS,PARTY_SIDES,MONOPOLY_SIDES} from './party-games.js';
 import { digest, secret } from './auth.js';
 import {settleRating} from './ratings.js';
 
@@ -127,11 +127,12 @@ export class RoomService {
     if (changed) this.changed(room); else this.schedule(room);
     return room;
   }
-  async create(user, minutes, kind='caro', side='random', capacity=2, ranked=true) {
+  async create(user, minutes, kind='caro', side='random', capacity=2, ranked=false) {
     if(typeof ranked!=='boolean')throw new GameError('Chế độ xếp hạng không hợp lệ.');
     if(!KINDS.includes(kind))throw new GameError('Môn cờ không hợp lệ.');
     if(!['first','second','random'].includes(side))throw new GameError('Bên quân không hợp lệ.');
-    if(!Number.isInteger(capacity)||capacity<2||capacity>(PARTY_KINDS.includes(kind)?4:2))throw new GameError('Số người không hợp lệ.');
+    const maxCapacity=kind==='monopoly'?8:PARTY_KINDS.includes(kind)?4:2;
+    if(!Number.isInteger(capacity)||capacity<2||capacity>maxCapacity)throw new GameError('Số người không hợp lệ.');
     if (!(kind==='monopoly'?[3,5,10,15,30,60,120]:kind==='commander'?[3,5,10,15,30]:[3,5,10,15]).includes(minutes)) throw new GameError('Thời gian không hợp lệ cho môn cờ này.');
     if(kind==='commander')minutes=COMMANDER_DURATION_MS/60_000;
     await this.pruneInactive();
@@ -191,7 +192,8 @@ export class RoomService {
       if (typeof token !== 'string' || digest(token) !== room.inviteHash || Date.now() >= room.inviteExpiresAt) throw new GameError('Lời mời không hợp lệ hoặc đã hết hạn. Hãy xin bạn một lời mời mới.', 403);
       if (seats(room).length>=(room.capacity||2)) throw new GameError('Phòng đã đủ người.', 409);
       if (room.game.phase !== 'waiting') throw new GameError('Phòng không còn nhận người chơi.', 409);
-      const next={id:actor.id,name:actor.display_name,mark:room.players?PARTY_SIDES.slice(0,room.capacity).find(side=>!room.players.some(s=>s.mark===side)):other(room.owner.mark,room.kind),ready:false,rematch:false};
+      const partyPool=room.kind==='monopoly'?MONOPOLY_SIDES:PARTY_SIDES;
+      const next={id:actor.id,name:actor.display_name,mark:room.players?partyPool.slice(0,room.capacity).find(side=>!room.players.some(s=>s.mark===side)):other(room.owner.mark,room.kind),ready:false,rematch:false};
       if(room.players){room.players.push(next);if(!room.guest)room.guest=next;for(const s of room.players)s.ready=false;}else room.guest=next;
       if(room.players)for(const s of room.players)await client.query('INSERT INTO room_members(room_id,player_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[room.id,s.id]);
       room.owner.ready = false;
