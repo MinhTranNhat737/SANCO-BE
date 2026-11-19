@@ -15,8 +15,9 @@ export class PracticeService {
     if(!Number.isInteger(workerCount)||workerCount<1||workerCount>16)throw new Error('BOT_WORKERS must be an integer from 1 to 16');
     this.botWorkers=workerCount;
     this.inactivityMs=Number.isFinite(options.inactivityMs)?options.inactivityMs:PRACTICE_INACTIVITY_MS;
+    this.partyBotDelayMs=Number.isFinite(options.partyBotDelayMs)?options.partyBotDelayMs:(process.env.NODE_ENV==='production'?1650:0);
     this.onDelete=options.onDelete||(()=>{});
-    this.pending=new Set();this.queue=[];this.workers=new Set();this.attemptedVersions=new Map();this.running=0;this.sweepTimer=null;this.closed=false;
+    this.pending=new Set();this.queue=[];this.workers=new Set();this.attemptedVersions=new Map();this.delayTimers=new Map();this.running=0;this.sweepTimer=null;this.closed=false;
   }
   async start(){
     await this.pruneInactive();
@@ -109,7 +110,26 @@ export class PracticeService {
     }
     game.version++;await client.query('UPDATE practice_games SET state=$1,version=$2,updated_at=$3 WHERE id=$4',[JSON.stringify(game),game.version,Date.now(),game.id]);
   }
-  changed(game,actor){if(this.closed)return;void this.scheduleSweep();this.onChange(practiceView(game),actor);if(game.phase==='playing'&&game.turn!==game.humanSide)this.schedule(game.id);}
+  changed(game,actor){
+    if(this.closed)return;
+    void this.scheduleSweep();
+    this.onChange(practiceView(game),actor);
+    if(game.phase==='playing'&&game.turn!==game.humanSide){
+      const isPartyGame=game.kind==='monopoly'||game.kind==='ludo';
+      if(isPartyGame&&this.partyBotDelayMs>0){
+        const last=game.moves.at(-1);
+        const delay=last?.action==='roll'?this.partyBotDelayMs:last?.side===game.turn?Math.round(this.partyBotDelayMs*0.5):Math.round(this.partyBotDelayMs*0.35);
+        this.scheduleDelayed(game.id,delay);
+      }else this.schedule(game.id);
+    }
+  }
+  scheduleDelayed(id,delayMs){
+    if(this.closed)return;
+    clearTimeout(this.delayTimers.get(id));
+    const timer=setTimeout(()=>{this.delayTimers.delete(id);if(!this.closed)this.schedule(id);},delayMs);
+    timer.unref();
+    this.delayTimers.set(id,timer);
+  }
   async get(id,actor){if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id||''))throw new GameError('Không tìm thấy ván luyện tập.',404);const {rows}=await this.db.query('SELECT state,updated_at FROM practice_games WHERE id=$1 AND player_id=$2',[id,actor]);if(!rows[0])throw new GameError('Không tìm thấy ván hoặc bạn không có quyền xem.',404);if(this.inactivityMs>0&&Date.now()-Number(rows[0].updated_at)>=this.inactivityMs){await this.ensureActive(id);}const state=rows[0].state;if(state.phase==='playing'&&state.turn!==state.humanSide)this.schedule(id);return practiceView(state);}
   async list(actor){await this.pruneInactive();const {rows}=await this.db.query("SELECT state - ARRAY['board','initialBoard','moves','repetitions','seenPositions','party','initialParty'] AS state,jsonb_array_length(state->'moves') AS move_count FROM practice_games WHERE player_id=$1 ORDER BY updated_at DESC LIMIT 20",[actor]);return rows.map(({state:g,move_count})=>({id:g.id,kind:g.kind,difficulty:g.difficulty,humanSide:g.humanSide,phase:g.phase,result:g.result,moves:move_count,createdAt:g.createdAt,ranked:!!g.ranked,bot:g.bot,ratingChange:g.ratingChange}));}
   async act(id,actor,body){
@@ -122,8 +142,8 @@ export class PracticeService {
       const {rows}=await client.query('SELECT request_hash FROM practice_receipts WHERE game_id=$1 AND action_id=$2',[id,actionId]);
       if(rows[0]){if(rows[0].request_hash!==hash)throw new GameError('Mã thao tác đã được sử dụng.',409);return {game,player:row.player_id};}
       if(game.version!==version)throw new GameError('Bàn cờ vừa cập nhật. Hãy chọn lại nước đi.',409);
-      if(action==='undo'){if(game.ranked)throw new GameError('Ván xếp hạng không được đi lại.',409);game=undoHumanTurn(game);}
-      else if(action==='resign'){if(game.phase!=='playing')throw new GameError('Ván đã kết thúc.',409);endPractice(game,oppositeSide(game.kind,game.humanSide),'resign');}
+      if(action==='undo'){if(game.ranked)throw new GameError('Ván xếp hạng không được đi lại.',409);clearTimeout(this.delayTimers.get(id));this.delayTimers.delete(id);game=undoHumanTurn(game);}
+      else if(action==='resign'){if(game.phase!=='playing')throw new GameError('Ván đã kết thúc.',409);clearTimeout(this.delayTimers.get(id));this.delayTimers.delete(id);endPractice(game,oppositeSide(game.kind,game.humanSide),'resign');}
       else if(action==='move'){if(game.turn!==game.humanSide)throw new GameError('Máy đang suy nghĩ. Chờ một chút nhé.',409);makePracticeMove(game,{from,to,promotion,pass,details,action:command});}
       else throw new GameError('Thao tác không được hỗ trợ.');
       await this.persist(client,game,row.player_id);await client.query('INSERT INTO practice_receipts(game_id,action_id,request_hash,created_at) VALUES($1,$2,$3,$4)',[id,actionId,hash,Date.now()]);
@@ -157,5 +177,5 @@ export class PracticeService {
     });
     if(output)this.changed(output.game,output.actor);
   }
-  async close(){this.closed=true;clearTimeout(this.sweepTimer);this.sweepTimer=null;this.queue=[];await Promise.all([...this.workers].map(worker=>worker.terminate()));}
+  async close(){this.closed=true;clearTimeout(this.sweepTimer);this.sweepTimer=null;for(const t of this.delayTimers.values())clearTimeout(t);this.delayTimers.clear();this.queue=[];await Promise.all([...this.workers].map(worker=>worker.terminate()));}
 }
