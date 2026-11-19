@@ -111,3 +111,30 @@ test('Skipping an unowned lot skips auction and ends turn; empty auction also sk
   assert.equal(p.lastPurchase.side,'R');
   assert.equal(p.lastPurchase.source,'buy');
 });
+test('Chance/community cards, tax, jail, rent and cash deductions emit structured events with reasons',()=>{
+  const g=create(),p=g.party;
+  const chanceIdx=VN_CELLS.find(c=>c.type==='chance').index;
+  const taxCell=VN_CELLS.find(c=>c.type==='tax');
+  const jailIdx=VN_CELLS.find(c=>c.type==='gotojail').index;
+
+  // Draw card 2 (repair fee -120) on Chance
+  p.players[0].position=(chanceIdx-3+48)%48;
+  const seq1=[1,2,2];
+  vietnamMove(g,{action:'roll',to:-1},()=>seq1.shift()||1);
+  assert.ok(p.events.some(e=>e.type==='card'&&e.deck==='chance'&&e.card===2&&e.amount===-120));
+  assert.ok(p.events.some(e=>e.type==='loss'&&e.amount===-120&&e.reason.includes('Sửa chữa')));
+
+  // Land on Tax
+  p.stage='end';move(g,'end');
+  p.players[1].position=(taxCell.index-3+48)%48;
+  const seq2=[1,2];
+  vietnamMove(g,{action:'roll',to:-1},()=>seq2.shift()||1);
+  assert.ok(p.events.some(e=>e.type==='tax'&&e.side==='G'&&e.amount===-taxCell.amount));
+
+  // Land on Go To Jail
+  p.stage='end';move(g,'end');
+  p.players[0].position=(jailIdx-3+48)%48;
+  const seq3=[1,2];
+  vietnamMove(g,{action:'roll',to:-1},()=>seq3.shift()||1);
+  assert.ok(p.events.some(e=>e.type==='jail'&&e.side==='R'&&e.reason.includes('Trại giam')));
+});
