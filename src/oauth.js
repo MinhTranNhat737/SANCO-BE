@@ -24,6 +24,8 @@ function safeEqual(a, b) {
 }
 
 export function createOAuthService({ db, allowedOrigins, secureCookies, fetchImpl = fetch, config = {} }) {
+  const facebookGraphVersion = config.facebookGraphVersion || process.env.FACEBOOK_GRAPH_VERSION || 'v26.0';
+  if (!/^v\d+\.0$/.test(facebookGraphVersion)) throw new Error('FACEBOOK_GRAPH_VERSION must have the form v26.0');
   const stateSecret = () => config.stateSecret || process.env.OAUTH_STATE_SECRET || EPHEMERAL_SECRET;
   const creds = provider => provider === 'google'
     ? {
@@ -184,12 +186,12 @@ export function createOAuthService({ db, allowedOrigins, secureCookies, fetchImp
 
   async function exchangeFacebook(code, callbackUrl) {
     const { id, secret } = creds('facebook');
-    const tokenUrl = new URL('https://graph.facebook.com/v20.0/oauth/access_token');
+    const tokenUrl = new URL(`https://graph.facebook.com/${facebookGraphVersion}/oauth/access_token`);
     tokenUrl.search = new URLSearchParams({ client_id: id, client_secret: secret, redirect_uri: callbackUrl, code }).toString();
     const tokenRes = await fetchImpl(tokenUrl.toString());
     const tokenData = await tokenRes.json().catch(() => null);
     if (!tokenRes.ok || !tokenData?.access_token) throw new Error('Không xác thực được với Facebook.');
-    const profileUrl = new URL('https://graph.facebook.com/v20.0/me');
+    const profileUrl = new URL(`https://graph.facebook.com/${facebookGraphVersion}/me`);
     profileUrl.search = new URLSearchParams({ fields: 'id,name,email', access_token: tokenData.access_token }).toString();
     const userRes = await fetchImpl(profileUrl.toString());
     const profile = await userRes.json().catch(() => null);
@@ -233,7 +235,7 @@ export function createOAuthService({ db, allowedOrigins, secureCookies, fetchImp
       }).toString();
       return res.redirect(authUrl.toString());
     }
-    const fbUrl = new URL('https://www.facebook.com/v20.0/dialog/oauth');
+    const fbUrl = new URL(`https://www.facebook.com/${facebookGraphVersion}/dialog/oauth`);
     fbUrl.search = new URLSearchParams({
       client_id: id,
       redirect_uri: cb,
