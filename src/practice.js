@@ -18,7 +18,8 @@ export class PracticeService {
     if(!Number.isInteger(workerCount)||workerCount<1||workerCount>16)throw new Error('BOT_WORKERS must be an integer from 1 to 16');
     this.botWorkers=workerCount;
     this.inactivityMs=Number.isFinite(options.inactivityMs)?options.inactivityMs:PRACTICE_INACTIVITY_MS;
-    this.partyBotDelayMs=Number.isFinite(options.partyBotDelayMs)?options.partyBotDelayMs:(process.env.NODE_ENV==='production'?1650:0);
+    const envPartyDelay=process.env.PARTY_BOT_DELAY_MS!==undefined?Number(process.env.PARTY_BOT_DELAY_MS):NaN;
+    this.partyBotDelayMs=Number.isFinite(options.partyBotDelayMs)?options.partyBotDelayMs:(Number.isFinite(envPartyDelay)?envPartyDelay:(process.env.NODE_ENV==='test'?0:2200));
     this.onDelete=options.onDelete||(()=>{});
     this.pending=new Set();this.queue=[];this.workers=new Set();this.attemptedVersions=new Map();this.delayTimers=new Map();this.running=0;this.sweepTimer=null;this.closed=false;
   }
@@ -121,7 +122,18 @@ export class PracticeService {
       const isPartyGame=game.kind==='monopoly'||game.kind==='ludo';
       if(isPartyGame&&this.partyBotDelayMs>0){
         const last=game.moves.at(-1);
-        const delay=last?.action==='roll'?this.partyBotDelayMs:last?.side===game.turn?Math.round(this.partyBotDelayMs*0.5):Math.round(this.partyBotDelayMs*0.35);
+        let delay;
+        if(last?.action==='roll'){
+          const steps=Array.isArray(last.dice)&&last.dice.length?last.dice.reduce((a,b)=>a+b,0):(Number(last.die)||6);
+          const stepMs=Math.round(this.partyBotDelayMs*0.065);
+          delay=this.partyBotDelayMs+steps*stepMs;
+        }else if(!last){
+          delay=Math.round(this.partyBotDelayMs*0.55);
+        }else if(last.side===game.turn){
+          delay=Math.round(this.partyBotDelayMs*0.45);
+        }else{
+          delay=Math.round(this.partyBotDelayMs*0.35);
+        }
         this.scheduleDelayed(game.id,delay);
       }else this.schedule(game.id);
     }
@@ -133,7 +145,7 @@ export class PracticeService {
     timer.unref();
     this.delayTimers.set(id,timer);
   }
-  async get(id,actor){if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id||''))throw new GameError('Không tìm thấy ván luyện tập.',404);const {rows}=await this.db.query('SELECT state,updated_at FROM practice_games WHERE id=$1 AND player_id=$2',[id,actor]);if(!rows[0])throw new GameError('Không tìm thấy ván hoặc bạn không có quyền xem.',404);if(this.inactivityMs>0&&Date.now()-Number(rows[0].updated_at)>=this.inactivityMs){await this.ensureActive(id);}const state=rows[0].state;if(state.phase==='playing'&&state.turn!==state.humanSide)this.schedule(id);return practiceView(state);}
+  async get(id,actor){if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id||''))throw new GameError('Không tìm thấy ván luyện tập.',404);const {rows}=await this.db.query('SELECT state,updated_at FROM practice_games WHERE id=$1 AND player_id=$2',[id,actor]);if(!rows[0])throw new GameError('Không tìm thấy ván hoặc bạn không có quyền xem.',404);if(this.inactivityMs>0&&Date.now()-Number(rows[0].updated_at)>=this.inactivityMs){await this.ensureActive(id);}const state=rows[0].state;if(state.phase==='playing'&&state.turn!==state.humanSide&&!this.delayTimers.has(id))this.schedule(id);return practiceView(state);}
   async list(actor){await this.pruneInactive();const {rows}=await this.db.query("SELECT state - ARRAY['board','initialBoard','moves','repetitions','seenPositions','party','initialParty'] AS state,jsonb_array_length(state->'moves') AS move_count FROM practice_games WHERE player_id=$1 ORDER BY updated_at DESC LIMIT 20",[actor]);return rows.map(({state:g,move_count})=>({id:g.id,kind:g.kind,difficulty:g.difficulty,humanSide:g.humanSide,phase:g.phase,result:g.result,moves:move_count,createdAt:g.createdAt,ranked:!!g.ranked,bot:g.bot,ratingChange:g.ratingChange}));}
   async act(id,actor,body){
     const {actionId,version,action,from=null,to,promotion,pass,command,details}=body;
@@ -155,7 +167,7 @@ export class PracticeService {
     this.changed(game,player);return practiceView(game);
   }
   schedule(id){if(this.closed||this.pending.has(id))return;this.pending.add(id);this.queue.push(id);this.pump();}
-  pump(){while(!this.closed&&this.running<this.botWorkers&&this.queue.length){const id=this.queue.shift();this.running++;this.runBot(id).catch(error=>console.error('Practice bot:',error.message)).finally(async()=>{this.pending.delete(id);this.running--;const attemptedVersion=this.attemptedVersions.get(id);this.attemptedVersions.delete(id);if(!this.closed){try{const {state}=await this.read(id);if(!this.closed&&state.version!==attemptedVersion&&state.phase==='playing'&&state.turn!==state.humanSide)this.schedule(id);}catch{}}this.pump();});}}
+  pump(){while(!this.closed&&this.running<this.botWorkers&&this.queue.length){const id=this.queue.shift();this.running++;this.runBot(id).catch(error=>console.error('Practice bot:',error.message)).finally(async()=>{this.pending.delete(id);this.running--;const attemptedVersion=this.attemptedVersions.get(id);this.attemptedVersions.delete(id);if(!this.closed&&!this.delayTimers.has(id)){try{const {state}=await this.read(id);if(!this.closed&&!this.delayTimers.has(id)&&state.version!==attemptedVersion&&state.phase==='playing'&&state.turn!==state.humanSide)this.schedule(id);}catch{}}this.pump();});}}
   async runBot(id){
     const {state:snapshot}=await this.read(id);if(this.closed||snapshot.phase!=='playing'||snapshot.turn===snapshot.humanSide)return;
     this.attemptedVersions.set(id,snapshot.version);

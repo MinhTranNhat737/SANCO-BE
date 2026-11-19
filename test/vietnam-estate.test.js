@@ -6,6 +6,7 @@ import {VN_CELLS,vietnamLegal,vietnamMove,vietnamRent,eliminateVietnam,chooseVie
 import {openDatabase} from '../src/database.js';
 import {createGuest} from '../src/auth.js';
 import {RoomService} from '../src/rooms.js';
+import {PracticeService} from '../src/practice.js';
 import {MONOPOLY_TURN_MS,newGame,startRoomGame,clockDeadline,settleTimeout} from '../src/room-game.js';
 import {trueRollDie} from '../src/party-games.js';
 const create=()=>createPractice('monopoly','R','medium',randomUUID());
@@ -177,4 +178,42 @@ test('CSPRNG dice roll produces unbiased uniform independent outcomes across all
     assert.ok(Math.abs(counts[face]-expected)<expected*0.15,`Face ${face} count ${counts[face]} deviated too far from ${expected}`);
   }
   assert.equal(pairs.size,36,'All 36 independent pairs must occur');
+});
+test('Monopoly practice bot respects post-roll delay and is never bypassed by pump().finally() or get()',async()=>{
+  const db=await openDatabase({memory:true});
+  const events=[];
+  const practice=new PracticeService(db,(view)=>{
+    events.push({at:Date.now(),version:view.version,moves:view.moves.length,lastAction:view.moves.at(-1)?.action||null,turn:view.turn});
+  },{partyBotDelayMs:300});
+  try{
+    const user=await createGuest(db);
+    const createdAt=Date.now();
+    const created=await practice.create(user,{kind:'monopoly',difficulty:'medium',side:'second'});
+    assert.equal(created.turn,'R');
+    assert.equal(created.humanSide,'G');
+    // Wait for bot's first move (roll)
+    const deadline=Date.now()+4000;
+    while(!events.some(e=>e.lastAction==='roll')&&Date.now()<deadline){
+      await new Promise(r=>setTimeout(r,20));
+    }
+    const rollEvt=events.find(e=>e.lastAction==='roll');
+    assert.ok(rollEvt,'Bot must emit its roll move');
+    assert.ok(rollEvt.at-createdAt>=120,`Bot opening roll should wait for board mount (elapsed ${rollEvt.at-createdAt}ms)`);
+
+    // Calling get() immediately after roll must NOT bypass the post-roll animation delay
+    await practice.get(created.id,user.id);
+    await new Promise(r=>setTimeout(r,120));
+    assert.equal(events.filter(e=>e.moves>rollEvt.moves).length,0,'Bot must NOT execute follow-up action while dice/walk delay is still active');
+
+    // Wait for bot's follow-up move (buy / skip_buy / auction / end / doubles roll)
+    while(!events.some(e=>e.moves>rollEvt.moves)&&Date.now()<deadline){
+      await new Promise(r=>setTimeout(r,20));
+    }
+    const nextEvt=events.find(e=>e.moves>rollEvt.moves);
+    assert.ok(nextEvt,'Bot must execute follow-up action after post-roll delay elapses');
+    assert.ok(nextEvt.at-rollEvt.at>=260,`Bot follow-up action must wait at least partyBotDelayMs after roll (elapsed ${nextEvt.at-rollEvt.at}ms)`);
+  }finally{
+    await practice.close();
+    await db.close();
+  }
 });
