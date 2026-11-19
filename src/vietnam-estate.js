@@ -17,7 +17,8 @@ const money=(n,minimum=0,maximum=100000)=>Number.isSafeInteger(n)&&n>=minimum&&n
 const demand=(ok,message)=>{if(!ok)throw new GameError(message);};
 const ledger=(g,kind,message,amount=0)=>{const p=g.party;p.ledger.push({id:++p.sequence,kind,message,amount,at:Date.now()});p.ledger=p.ledger.slice(-100);p.loans=[...p.loans.filter(l=>['open','due'].includes(l.status)),...p.loans.filter(l=>!['open','due'].includes(l.status)).slice(-20)];p.message=message;};
 const emitEvent=(g,ev)=>{const p=g.party;if(!p.events)p.events=[];p.eventSeq=(p.eventSeq||0)+1;p.events.push({id:p.eventSeq,at:Date.now(),...ev});p.events=p.events.slice(-12);};
-function finish(g,winner,reason){g.phase='finished';g.result={winner,reason,line:[],at:Date.now()};}
+export function closeVietnam(p){p.stage='finished';p.auction=null;p.pending=null;p.debt=null;p.payments=[];p.extraRoll=false;}
+function finish(g,winner,reason){closeVietnam(g.party);g.phase='finished';g.result={winner,reason,line:[],at:Date.now()};}
 export const VN_SIDES=['R','G','Y','B','P','O','C','K'];
 export function newVietnam(count=2,selection,seatSides){
   demand(Number.isInteger(count)&&count>=2&&count<=8,'Tỷ phú cần 2–8 người.');
@@ -172,7 +173,7 @@ export function vietnamMove(g,request,roll){const p=g.party,me=player(g),action=
   else if(action==='bankrupt')eliminateVietnam(g,me.side,'bankrupt');
   return {label:p.message,...(die?{die,dice:values}:{}),...(card?{card}:{})};
 }
-export function eliminateVietnam(g,side,reason='resign'){const p=g.party,me=player(g,side);if(!me?.active)return;const creditor=g.turn===side?p.debt?.creditor:null,receiver=player(g,creditor);if(receiver?.active){receiver.cash+=me.cash;for(let i=0;i<48;i++)if(p.property[i]===side)p.property[i]=receiver.side;}else for(let i=0;i<48;i++)if(p.property[i]===side){if(p.houses[i]===5)p.bank.hotels++;else p.bank.houses+=p.houses[i];p.property[i]=null;p.houses[i]=0;p.mortgaged[i]=false;}me.cash=0;me.active=false;for(const l of p.loans){if(l.borrower===side&&['open','due'].includes(l.status))l.status='defaulted';if(l.lender===side)l.lender=null;}ledger(g,'bankrupt',`${side} rời ván · ${reason}`);
+export function eliminateVietnam(g,side,reason='resign'){const p=g.party,me=player(g,side);if(!me?.active)return;const creditor=g.turn===side?p.debt?.creditor:null,receiver=creditor?player(g,creditor):null;if(receiver?.active){receiver.cash+=me.cash;for(let i=0;i<48;i++)if(p.property[i]===side)p.property[i]=receiver.side;}else for(let i=0;i<48;i++)if(p.property[i]===side){if(p.houses[i]===5)p.bank.hotels++;else p.bank.houses+=p.houses[i];p.property[i]=null;p.houses[i]=0;p.mortgaged[i]=false;}me.cash=0;me.active=false;for(const l of p.loans){if(l.borrower===side&&['open','due'].includes(l.status))l.status='defaulted';if(l.lender===side)l.lender=null;}ledger(g,'bankrupt',`${side} rời ván · ${reason}`);
   if(alive(p).length<=1){finish(g,alive(p)[0]?.side||null,reason);return;}
   if(p.pending&&(p.pending.from===side||p.pending.to===side)){const owner=p.pending.returnSide||p.pending.from;resumeDeal(g);if(owner===side)nextTurn(g);return;}
   if(p.auction){if(p.auction.leader===side){p.auction.leader=null;p.auction.bid=0;}if(!p.auction.passed.includes(side))p.auction.passed.push(side);if(g.turn===side)nextAuction(g);return;}

@@ -6,7 +6,7 @@ import { initialXiangqi, xLegal, xInCheck, xOther } from './xiangqi.js';
 import {discKinds,initialDiscs,discLegal,playDisc} from './disc-games.js';
 import {GRID_KINDS,initialGrid,gridLegal,gridMove} from './grid-games.js';
 import {PARTY_KINDS,newParty,partyLegal,partyMove,PARTY_SIDES} from './party-games.js';
-import {startVietnam} from './vietnam-estate.js';
+import {startVietnam,closeVietnam,VN_EDITION} from './vietnam-estate.js';
 
 export const KINDS = ['caro','chess','xiangqi','reversi','connect4','go','ludo','monopoly','checkers','tictactoe',...ABSTRACT_KINDS,'commander'];
 export const boardSide = (kind, first=true) => kind==='caro'||kind==='tictactoe' ? first?'X':'O' : kind==='chess' ? first?'w':'b' : kind==='breakthrough'?first?'W':'B':ABSTRACT_KINDS.includes(kind)?first?'B':'W': ['reversi','go','checkers'].includes(kind)?first?'B':'W':PARTY_KINDS.includes(kind)?first?'R':'G':kind==='connect4'?first?'R':'Y':first?'r':'b';
@@ -43,6 +43,7 @@ export function legalMoves(game) {
   return new Chess(game.fen).moves({verbose:true}).map(move=>({from:squareIndex(move.from),to:squareIndex(move.to),...(move.promotion?{promotion:move.promotion}:{})}));
 }
 export function endPractice(game,winner,reason,at=Date.now(),line=[]) {
+  if(game.kind==='monopoly'&&game.party?.edition===VN_EDITION)closeVietnam(game.party);
   game.phase='finished'; game.result={winner,reason,at,line};
 }
 export function makePracticeMove(game, request, now=Date.now()) {

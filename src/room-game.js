@@ -77,7 +77,18 @@ export function applyAction(room,actor,action,data,now,nextGameId){
   if(g.phase!=='playing')throw new GameError('Ván chưa bắt đầu hoặc đã kết thúc.',409);
   if(g.party&&!g.party.players.find(p=>p.side===me.mark)?.active)throw new GameError('Bạn đã dừng ván.',409);
   const consume=()=>{if(g.matchDeadline==null)g.remaining[g.turn]=Math.max(0,g.remaining[g.turn]-(now-g.turnStartedAt));};
-  if(action==='resign'){consume();if(g.party){eliminateParty(g,me.mark);g.turnStartedAt=g.phase==='playing'?now:null;if(g.turnLimitMs)g.turnDeadline=g.phase==='playing'?now+g.turnLimitMs:null;}else caro.finish(g,other(me.mark,room.kind),'resign',now);return;}
+  if(action==='resign'){
+    const previous=g.turn,previousStage=g.party?.stage;
+    consume();
+    if(g.party){
+      eliminateParty(g,me.mark);g.turnStartedAt=g.phase==='playing'?now:null;
+      if(g.turnLimitMs){
+        if(g.phase!=='playing')g.turnDeadline=null;
+        else if(g.turn!==previous||g.party.stage!==previousStage)g.turnDeadline=now+g.turnLimitMs;
+      }
+    }else caro.finish(g,other(me.mark,room.kind),'resign',now);
+    return;
+  }
   if(g.party&&['draw','decline'].includes(action))throw new GameError('Ván nhiều người không hỗ trợ xin hòa.');
   if(action==='draw'){
     if(room.drawOffer===actor)throw new GameError('Bạn đã gửi lời mời hòa.');
