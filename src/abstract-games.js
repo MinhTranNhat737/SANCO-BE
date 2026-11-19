@@ -127,7 +127,7 @@ function evaluate(game,root){
 }
 export function chooseAbstract(game){
   const moves=abstractLegal(game);if(!moves.length)return null;
-  const root=game.turn,deadline=performance.now()+({easy:35,medium:100,hard:240}[game.difficulty]||100);
+  const root=game.turn,deadline=performance.now()+({easy:35,medium:100,hard:900}[game.difficulty]||100);
   const simulate=(g,m)=>{const next={...g,board:[...g.board]};const out=abstractMove(next,m);if(out?.result)next.result=out.result;return next;};
   const ranked=(g)=>abstractLegal(g).map(move=>{const next=simulate(g,move);return {move,next,score:evaluate(next,root)};}).sort((a,b)=>g.turn===root?b.score-a.score:a.score-b.score);
   let best=moves[0];
@@ -143,7 +143,7 @@ export function chooseAbstract(game){
     return Number.isFinite(value)?value:evaluate(g,root);
   };
   const options=ranked(game);best=options[0].move;
-  for(let depth=1;depth<=({easy:1,medium:2,hard:3}[game.difficulty]||2);depth++){
+  for(let depth=1;depth<=({easy:1,medium:2,hard:5}[game.difficulty]||2);depth++){
     let candidate=best,score=-Infinity;
     try{for(const item of options){const value=search(item.next,depth-1,-Infinity,Infinity);if(value>score){score=value;candidate=item.move;}}best=candidate;}catch(error){if(error!=='deadline')throw error;break;}
   }

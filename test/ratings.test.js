@@ -131,10 +131,11 @@ test('Rated rooms settle resignation, rematch and clock expiry once; friendly ro
   assert.equal((await playerRatings(db,a.id)).chess.games,0);
 });
 
-test('All 192 bot profiles belong to one game, span Elo levels and make legal moves',()=>{
+test('All 200 bot profiles retain old IDs and add native-engine elite opponents with legal moves',()=>{
   const ids=new Set();
   for(const kind of KINDS){
-    const roster=botRoster(kind);assert.equal(roster.length,12);assert.equal(roster[0].elo,400);assert.equal(roster.at(-1).elo,2050);
+    const native=['chess','xiangqi'].includes(kind),roster=botRoster(kind);assert.equal(roster.length,native?16:12);assert.equal(roster[0].elo,400);assert.equal(roster.at(-1).elo,native?3200:2050);
+    assert.equal(roster[11].id,`${kind}-bot-2050`);if(native)assert.deepEqual(roster.slice(12).map(bot=>bot.elo),[2200,2500,2800,3200]);
     for(const bot of roster){assert.ok(!ids.has(bot.id));ids.add(bot.id);}
     assert.throws(()=>selectBot(kind,1000,'wrong-game-bot'));
     for(let n=0;n<8;n++)assert.ok(Math.abs(selectBot(kind,1000).elo-1000)<=150);
@@ -143,7 +144,7 @@ test('All 192 bot profiles belong to one game, span Elo levels and make legal mo
       const move=chooseBotMove(game);assert.ok(legalMoves(game).some(m=>JSON.stringify(m)===JSON.stringify(move)),`${kind}: ${bot.elo} returned a legal move`);
     }
   }
-  assert.equal(ids.size,192);
+  assert.equal(ids.size,200);
 });
 
 test('Ranked bot games resume active matches, block undo and settle resignation/idempotent retry',async()=>{

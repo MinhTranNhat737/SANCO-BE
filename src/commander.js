@@ -259,7 +259,7 @@ export function commanderMove(game,request){
 }
 export function chooseCommander(game){
   const moves=commanderLegal(game);if(!moves.length)return null;
-  const side=game.turn,start=performance.now(),budget={easy:35,medium:100,hard:220}[game.difficulty]||100;
+  const side=game.turn,start=performance.now(),budget={easy:35,medium:100,hard:800}[game.difficulty]||100;
   const scored=moves.map(move=>{
     const victim=ctlUnits(game.board[move.to]),unit=ctlUnits(game.board[move.from])[+move.action.split('-')[1]];
     const capture=victim[0]?.[0]!==side?victim.reduce((n,u)=>n+(CTL_VALUES[type(u)]||0),0):0;
@@ -267,7 +267,7 @@ export function chooseCommander(game){
     return {move,score:capture*10+progress+(move.action.endsWith('-board')?2:0)-(type(unit)==='K'?3:0)};
   }).sort((a,b)=>b.score-a.score);
   let best=scored[0].move,bestScore=-Infinity;
-  for(const {move,score}of scored.slice(0,game.difficulty==='easy'?12:40)){
+  for(const {move,score}of scored.slice(0,game.difficulty==='easy'?12:game.difficulty==='hard'?100:40)){
     if(performance.now()-start>budget&&bestScore>-Infinity)break;
     const copy={...game,board:[...game.board],commander:structuredClone(game.commander)};
     const out=commanderMove(copy,move);if(!out)continue;

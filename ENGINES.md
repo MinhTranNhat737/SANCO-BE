@@ -17,15 +17,29 @@ Trình cài hỗ trợ Windows/Linux x64, tải bản phát hành chính thức,
 
 ## Đa dạng lối chơi
 
-Engine phân tích tối đa bốn phương án bằng MultiPV. Server chỉ chọn giữa các nước trong khoảng điểm cho phép của mức khó; nước thắng chiếu hết được ưu tiên theo đánh giá engine. Mỗi ván dùng seed riêng, với thiên hướng cân bằng, chủ động, thế trận hoặc chắc chắn. Những nước lùi lại ngay và thế cờ đã xuất hiện được giảm trọng số, không cấm một nước lặp cần thiết để cứu hòa.
+Mức Dễ/Vừa phân tích tối đa bốn phương án bằng MultiPV. Server chỉ chọn giữa các nước trong khoảng điểm cho phép, với seed riêng và thiên hướng cân bằng, chủ động, thế trận hoặc chắc chắn. Những nước lùi lại ngay và thế cờ đã xuất hiện được giảm trọng số, không cấm một nước lặp cần thiết để cứu hòa.
 
-Các mức dễ/vừa/khó và hồ sơ bot Elo có ngân sách thời gian/độ sâu và khoảng sai số khác nhau. Elo bot vẫn là **ước lượng nội bộ**, chưa được hiệu chuẩn bằng thi đấu, không phải Elo chính thức của Stockfish hay Fairy-Stockfish. Engine có thể kết thúc tìm kiếm sớm khi đạt độ sâu hoặc thời gian đã đặt.
+Mức Khó và bot từ 2.200 Elo dùng **MultiPV 1**, Skill Level 20, không bật UCI_LimitStrength, không cố tình chọn nước yếu hơn. Server lấy `bestmove` cuối cùng của engine thay vì chọn từ điểm MultiPV của vòng tìm kiếm cũ. Đây cũng là cách cấu hình MultiPV được [Stockfish khuyến nghị để đạt hiệu năng tốt nhất](https://official-stockfish.github.io/docs/stockfish-wiki/UCI-Protocol-and-Stockfish-Commands.html#multipv).
+
+| Hồ sơ | Thời gian tối đa/nước | Giới hạn độ sâu |
+| --- | ---: | --- |
+| Dễ | 100 ms | 5 |
+| Vừa | 500 ms | 12 |
+| Khó | 3.000 ms | Không chặn theo độ sâu |
+| 2.200 Elo nội bộ | 1.800 ms | Không chặn theo độ sâu |
+| 2.500 Elo nội bộ | 2.760 ms | Không chặn theo độ sâu |
+| 2.800 Elo nội bộ | 3.720 ms | Không chặn theo độ sâu |
+| 3.200 Elo nội bộ | 5.000 ms | Không chặn theo độ sâu |
+
+Cờ vua/cờ tướng giữ nguyên 12 ID bot cũ và thêm 4 đối thủ 2.200, 2.500, 2.800, 3.200. Các môn khác vẫn dùng thang Elo cũ; mức Khó tăng ngân sách/độ sâu tìm kiếm cho các bot có tìm kiếm, mở rộng các ứng viên chiến thuật Caro/Tư lệnh. Bot nội bộ từ 1.700 Elo không cố tình chọn nước ngẫu nhiên để nhường người chơi. Cờ xúc xắc vẫn phụ thuộc xác suất; tăng Elo không thay đổi kết quả xúc xắc.
+
+Các mức dễ/vừa/khó và hồ sơ bot Elo có ngân sách thời gian/độ sâu và khoảng sai số khác nhau. Elo bot vẫn là **ước lượng nội bộ**, chưa được hiệu chuẩn bằng thi đấu, không phải Elo chính thức của Stockfish hay Fairy-Stockfish. Engine có thể kết thúc tìm kiếm sớm khi đạt giới hạn hoặc xác định kết quả. Một process engine xử lý tuần tự nên bàn đông có thể phải chờ thêm trong hàng đợi. Khi phải dùng bot dự phòng, chất lượng phụ thuộc thuật toán nội bộ; mức Elo hiển thị không phải chứng nhận sức mạnh của bot dự phòng.
 
 Ván mới lưu vị trí xuất phát và gửi cả lịch sử nước đi cho engine. Ván cờ vua cũ thiếu `initialFen` dùng FEN hiện tại; bộ luật server vẫn phân xử lặp thế, nhập thành, bắt tốt qua đường và phong cấp. Cờ tướng vẫn theo chính sách luyện tập hiện có của dự án, chưa có bộ phân xử chiếu dai/đuổi dai WXF.
 
 ## Kiểm tra
 
-`npm test` chạy các luật, API và kiểm thử giao thức/lỗi/đóng tiến trình bằng engine mô phỏng, độc lập với binary đã cài. `npm run test:engines` dùng hai binary thật để kiểm tra đa dạng khai cuộc, nước hợp lệ, chiếu hết, phong cấp, API HTTP và đi lại. Không tự tải binary trong bộ kiểm thử.
+`npm test` chạy các luật, API và kiểm thử giao thức/lỗi/đóng tiến trình bằng engine mô phỏng, độc lập với binary đã cài. `npm run test:engines` dùng hai binary thật để kiểm tra đa dạng khai cuộc, nước hợp lệ, chiếu hết, phong cấp, thắng vật chất, phòng thủ bắt buộc, API HTTP và đi lại; ghi số node, độ sâu và thời gian thực tế của một số vị trí. Không tự tải binary trong bộ kiểm thử.
 
 ## Nguồn và giấy phép
 

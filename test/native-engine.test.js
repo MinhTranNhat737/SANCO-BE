@@ -4,11 +4,14 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NativeBotService, UciEngine, engineConfiguration, enginePosition, moveToUci, selectEngineCandidate, xiangqiFen } from '../src/native-engine.js';
+import { NativeBotService, UciEngine, engineConfiguration, enginePosition, engineStrength, moveToUci, selectEngineCandidate, xiangqiFen } from '../src/native-engine.js';
 import { boardSide, createPractice, legalMoves, makePracticeMove } from '../src/practice-engine.js';
 import { openDatabase } from '../src/database.js';
 import { createGuest } from '../src/auth.js';
 import { PracticeService } from '../src/practice.js';
+import { Chess } from 'chess.js';
+import { chooseBotMove } from '../src/bot.js';
+import { chessBoard } from '../src/practice-engine.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/uci-engine.mjs', import.meta.url));
 const configuration = (mode = 'normal', log) => ({ path: process.execPath, args: [fixture, mode, ...(log ? [log] : [])], id: 'fixture-engine' });
@@ -33,7 +36,7 @@ test('Move diversity is seeded per game and stays inside the score-loss bound; f
   const bad = {uci:moveToUci('chess',legal[4]),score:-900};
   const selected = new Set();
   for(let n=0;n<100;n++) {
-    const g={...base,id:`diverse-${n}`,difficulty:'hard'};
+    const g={...base,id:`diverse-${n}`,difficulty:'medium'};
     const answer=selectEngineCandidate(g,[...candidates,bad]);
     assert.notEqual(moveToUci('chess',answer.move),bad.uci);
     assert.deepEqual(selectEngineCandidate(g,[...candidates,bad]),answer);
@@ -42,6 +45,39 @@ test('Move diversity is seeded per game and stays inside the score-loss bound; f
   assert.ok(selected.size>=3,`Expected several good moves, saw ${selected.size}`);
   assert.equal(moveToUci('chess',selectEngineCandidate(base,[{...candidates[0],score:99900},...candidates.slice(1)]).move),candidates[0].uci);
   assert.equal(selectEngineCandidate(base,[{uci:'z9z9',score:100}]),null);
+});
+
+test('Hard and elite profiles never deliberately choose a weaker scored move; budgets scale up to 3200',()=>{
+  const base=game(),legal=legalMoves(base),candidates=legal.slice(0,4).map((move,index)=>({uci:moveToUci('chess',move),score:100-index}));
+  for(let n=0;n<100;n++)for(const profile of [{difficulty:'hard'},{bot:{elo:2200}},{bot:{elo:3200}}]){
+    const g={...base,...profile,id:`elite-${n}`};assert.equal(moveToUci('chess',selectEngineCandidate(g,candidates).move),candidates[0].uci);
+  }
+  const hard=engineStrength({...base,difficulty:'hard'});assert.equal(hard.multiPv,1);assert.equal(hard.loss,0);assert.equal(hard.depth,null);assert.equal(hard.ms,3000);
+  let previous=0;
+  for(const elo of [400,1000,1450,2050,2200,2500,2800,3200]){const strength=engineStrength({...base,bot:{elo}});assert.ok(strength.ms>previous);previous=strength.ms;assert.ok(strength.ms<=5000);}
+  assert.equal(engineStrength({...base,bot:{elo:3200}}).ms,5000);
+});
+
+test('Strong internal fallback profiles never enter the deliberate random-error branch',()=>{
+  const original=Math.random;
+  try{
+    Math.random=()=>{throw new Error('Strong bot attempted a random mistake');};
+    for(const elo of [1700,2050,2200,3200]){
+      const position=new Chess('7k/5Q2/6K1/8/8/8/8/8 w - - 0 1'),g={...game(),difficulty:'hard',bot:{elo}};
+      g.fen=position.fen();g.initialFen=g.fen;g.board=chessBoard(position);g.initialBoard=[...g.board];
+      const move=chooseBotMove(g);makePracticeMove(g,move);assert.equal(g.result?.reason,'checkmate');
+    }
+  }finally{Math.random=original;}
+});
+
+test('Full-strength searches use MultiPV 1 and final bestmove without a shallow depth cap',async()=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'sanco-engine-test-')),log=path.join(directory,'commands.log');
+  const service=new NativeBotService({engines:{chess:configuration('finalbest',log)},maxProcesses:1});
+  try{
+    const g={...game(),difficulty:'hard',bot:{elo:3200}};const result=await service.chooseMove(g);
+    assert.deepEqual(result.move,legalMoves(g)[1]);assert.equal(result.engine.style,'precise');
+    const commands=await readFile(log,'utf8');assert.match(commands,/setoption name MultiPV value 1/);assert.match(commands,/setoption name Skill Level value 20/);assert.match(commands,/setoption name UCI_LimitStrength value false/);assert.match(commands,/go movetime 5000 searchmoves/);assert.doesNotMatch(commands,/go depth/);
+  }finally{await service.close();assert.ok(path.resolve(directory).startsWith(path.resolve(tmpdir())+path.sep)&&path.basename(directory).startsWith('sanco-engine-test-'));await rm(directory,{recursive:true,force:true});}
 });
 
 test('An engine pool serializes requests, reuses processes and changes variants without exceeding its limit', async () => {

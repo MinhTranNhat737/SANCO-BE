@@ -171,7 +171,7 @@ export function chooseCaro(game) {
 
   // 4. Multi-ply tactical lookahead on Medium/Hard when top moves are close
   if (game.difficulty !== 'easy' && ranked[0].value < 3500000 && ranked.length > 1) {
-    const topMoves = ranked.slice(0, game.difficulty === 'hard' ? 8 : 5);
+    const topMoves = ranked.slice(0, game.difficulty === 'hard' ? 14 : 5);
     let bestTo = topMoves[0].to;
     let bestScore = -Infinity;
 
@@ -179,8 +179,9 @@ export function chooseCaro(game) {
       board[item.to] = side;
       // Evaluate opponent's strongest counter-threat on the next ply
       let maxEnemyReply = 0;
-      for (const reply of topMoves) {
-        if (reply.to === item.to) continue;
+      for (const to of candidates) {
+        const reply={to};
+        if (board[to]) continue;
         const replyScore =
           caroPointScore(board, reply.to, enemy) + caroPointScore(board, reply.to, side) * 0.9;
         if (replyScore > maxEnemyReply) maxEnemyReply = replyScore;
@@ -284,8 +285,8 @@ export function chooseChess(game) {
     }
   }
 
-  const budget = { easy: 85, medium: 260, hard: 680 }[game.difficulty] || 260;
-  const maxDepth = { easy: 2, medium: 3, hard: 4 }[game.difficulty] || 3;
+  const budget = { easy: 85, medium: 260, hard: 1600 }[game.difficulty] || 260;
+  const maxDepth = { easy: 2, medium: 3, hard: 6 }[game.difficulty] || 3;
   const deadline = performance.now() + budget;
   const tt = new Map();
   const killers = Array.from({ length: 12 }, () => [null, null]);
@@ -472,8 +473,8 @@ export function chooseXiangqi(game) {
   }
 
   const deadline =
-    performance.now() + ({ easy: 80, medium: 240, hard: 620 }[game.difficulty] || 240);
-  const maxDepth = { easy: 2, medium: 3, hard: 4 }[game.difficulty] || 3;
+    performance.now() + ({ easy: 80, medium: 240, hard: 1500 }[game.difficulty] || 240);
+  const maxDepth = { easy: 2, medium: 3, hard: 6 }[game.difficulty] || 3;
   let best = rootMoves[0];
   let nodes = 0;
 
@@ -688,14 +689,14 @@ export function chooseDiscs(game) {
   }
 
   const deadline =
-    performance.now() + ({ easy: 65, medium: 200, hard: 560 }[game.difficulty] || 200);
+    performance.now() + ({ easy: 65, medium: 200, hard: 1400 }[game.difficulty] || 200);
   const emptyCount = board.filter(v => !v).length;
   const depthLimit =
     game.kind === 'connect4'
-      ? { easy: 3, medium: 5, hard: 7 }[game.difficulty]
+      ? { easy: 3, medium: 5, hard: 10 }[game.difficulty]
       : emptyCount <= 8 && game.difficulty === 'hard'
       ? 8
-      : { easy: 2, medium: 4, hard: 5 }[game.difficulty];
+      : { easy: 2, medium: 4, hard: 8 }[game.difficulty];
 
   const evaluate = b => (game.kind === 'reversi' ? evaluateReversi(b, root) : evaluateConnect4(b, root));
   const tt = new Map();
@@ -991,8 +992,8 @@ function chooseCheckersMove(game, moves) {
   }
 
   const root = game.turn;
-  const maxDepth = { easy: 2, medium: 4, hard: 6 }[game.difficulty] || 4;
-  const deadline = performance.now() + ({ easy: 60, medium: 160, hard: 380 }[game.difficulty] || 160);
+  const maxDepth = { easy: 2, medium: 4, hard: 9 }[game.difficulty] || 4;
+  const deadline = performance.now() + ({ easy: 60, medium: 160, hard: 1200 }[game.difficulty] || 160);
 
   function search(b, turn, forcedFrom, depth, alpha, beta) {
     if (performance.now() > deadline) throw TIMEOUT;
@@ -1095,7 +1096,7 @@ export function chooseGrid(game) {
 }
 
 export function chooseBotMove(game) {
-  if(game.bot){
+  if(game.bot&&game.bot.elo<1700){
     // Elo labels start as estimates. Higher profiles make fewer random errors;
     // the existing difficulty also increases search strength and time budget.
     const errorRate=.85*Math.max(0,(2200-game.bot.elo)/1800)**2;

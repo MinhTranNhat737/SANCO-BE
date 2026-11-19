@@ -10,7 +10,7 @@ const config=engineConfiguration({...process.env,NATIVE_ENGINES:'true'});
 assert.ok(config.engines.chess&&config.engines.xiangqi,'Run npm run engines:install before testing native engines.');
 process.env.NATIVE_ENGINES='true';
 
-test('Official engines produce varied legal play, preserve histories and solve a chess mate in one', {timeout:60000}, async()=>{
+test('Official engines produce varied legal play, preserve histories and solve a chess mate in one', {timeout:120000}, async()=>{
   const service=new NativeBotService(config);
   try {
     for(const kind of ['chess','xiangqi']) {
@@ -40,6 +40,26 @@ test('Official engines produce varied legal play, preserve histories and solve a
     const answer=await service.chooseMove(promotion);makePracticeMove(promotion,answer.move);
     assert.ok(['q','r'].includes(answer.move.promotion));
     assert.equal(promotion.result?.reason,'checkmate');
+  }finally{await service.close();}
+});
+
+test('Hard engines solve material wins and forced defense; elite searches report real nodes and depth',{timeout:45000},async()=>{
+  const service=new NativeBotService(config);
+  try{
+    for(const [fen,expected,elo] of [
+      ['1q5k/8/8/8/8/8/8/KR6 w - - 0 1','b1b8',3200],
+      ['6rk/6Q1/5K2/8/8/8/8/8 b - - 0 1','g8g7',2200],
+    ]){
+      const position=new Chess(fen),g=createPractice('chess',position.turn()==='w'?'b':'w','hard',randomUUID());
+      g.fen=position.fen();g.initialFen=g.fen;g.board=chessBoard(position);g.initialBoard=[...g.board];g.turn=position.turn();g.bot={id:`chess-bot-${elo}`,elo};
+      const answer=await service.chooseMove(g),move=answer.move;
+      const uci=`${'abcdefgh'[move.from%8]}${8-Math.floor(move.from/8)}${'abcdefgh'[move.to%8]}${8-Math.floor(move.to/8)}`;
+      assert.equal(uci,expected);assert.equal(answer.engine.style,'precise');assert.ok(answer.analysis.depth>0);assert.ok(answer.analysis.nodes>0);
+      console.log(`Chess ${elo}: ${uci}, depth ${answer.analysis.depth}, ${answer.analysis.nodes} nodes, ${answer.analysis.timeMs} ms`);
+    }
+    const g=createPractice('xiangqi','b','hard',randomUUID());g.board.fill(null);g.board[85]='rK';g.board[4]='bK';g.board[49]='rP';g.board[27]='rR';g.board[35]='bR';g.initialBoard=[...g.board];g.bot={id:'xiangqi-bot-3200',elo:3200};
+    const answer=await service.chooseMove(g);assert.equal(answer.move.from,27);assert.equal(answer.move.to,35);assert.equal(answer.engine.style,'precise');assert.ok(answer.analysis.depth>0);assert.ok(answer.analysis.nodes>0);
+    console.log(`Xiangqi 3200: won undefended rook, depth ${answer.analysis.depth}, ${answer.analysis.nodes} nodes, ${answer.analysis.timeMs} ms`);
   }finally{await service.close();}
 });
 

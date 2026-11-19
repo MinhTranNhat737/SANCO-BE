@@ -24,7 +24,9 @@ const BOT_NAMES=['Mầm Non','Tre Nhỏ','Trúc Xanh','Thông Reo','Bách Diệp
 export function botRoster(kind){validKind(kind);return BOT_NAMES.map((name,index)=>{
   const elo=400+index*150;
   return {id:`${kind}-bot-${elo}`,name,elo,rank:ratingView({elo,games:10}).rank,difficulty:elo<850?'easy':elo<1450?'medium':'hard',estimated:true};
-});}
+}).concat(['chess','xiangqi'].includes(kind)?[
+  {elo:2200,name:'Huyền Vũ'},{elo:2500,name:'Côn Bằng'},{elo:2800,name:'Thiên Long'},{elo:3200,name:'Kỳ Thánh'}
+].map(({elo,name})=>({id:`${kind}-bot-${elo}`,name,elo,rank:ratingView({elo,games:10}).rank,difficulty:'hard',estimated:true})):[]);}
 export function selectBot(kind,elo,id){
   const roster=botRoster(kind);
   if(id){const bot=roster.find(item=>item.id===id);if(!bot)throw new GameError('Bot không hợp lệ cho môn cờ này.');return bot;}

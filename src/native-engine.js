@@ -9,7 +9,7 @@ import { selectVariant } from './openings.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const STYLES = ['balanced', 'attacking', 'positional', 'solid'];
-export const ENGINE_STYLE_NAMES = { balanced: 'Cân bằng', attacking: 'Chủ động', positional: 'Thế trận', solid: 'Chắc chắn' };
+export const ENGINE_STYLE_NAMES = { balanced: 'Cân bằng', attacking: 'Chủ động', positional: 'Thế trận', solid: 'Chắc chắn', precise: 'Tối ưu' };
 
 function integer(value, fallback, min, max, name) {
   const number = Number(value ?? fallback);
@@ -64,11 +64,16 @@ export function enginePosition(game) {
 }
 
 export function engineStrength(game) {
-  const levels = { easy: { ms: 90, depth: 4, loss: 180 }, medium: { ms: 230, depth: 9, loss: 75 }, hard: { ms: 550, depth: 15, loss: 28 } };
+  const levels = { easy: { ms: 100, depth: 5, loss: 160, multiPv: 4 }, medium: { ms: 500, depth: 12, loss: 40, multiPv: 4 }, hard: { ms: 3000, depth: null, loss: 0, multiPv: 1 } };
   const level = levels[game.difficulty] || levels.medium;
   if (!game.bot) return level;
-  const scale = Math.max(0, Math.min(1, (game.bot.elo - 400) / 1650));
-  return { ms: Math.round(65 + 485 * scale), depth: Math.round(3 + 12 * scale), loss: Math.round(230 - 205 * scale) };
+  const elo=Number.isFinite(game.bot.elo)?game.bot.elo:1000;
+  if(elo>=2200){
+    const scale=Math.min(1,(elo-2200)/1000);
+    return {ms:Math.round(1800+3200*scale),depth:null,loss:0,multiPv:1};
+  }
+  const scale = Math.max(0, Math.min(1, (elo - 400) / 1800));
+  return { ms: Math.round(90 + 1410 * scale * scale), depth: Math.round(4 + 16 * scale), loss: Math.round(200 * (1-scale)**2), multiPv: 4 };
 }
 
 function randomUnit(seed) { return selectVariant(seed, 1_000_003) / 1_000_003; }
@@ -95,6 +100,7 @@ export function selectEngineCandidate(game, candidates, legal = legalMoves(game)
   if (!available.length) return null;
   const best = Math.max(...available.map(candidate => candidate.score));
   const eligible = available.filter(candidate => best - candidate.score <= strength.loss);
+  if(strength.loss===0)return {move:eligible[0].move,style:'precise'};
   const lastOwn = game.moves?.findLast(move => move.side === game.turn);
   const weighted = eligible.map(candidate => {
     const move = candidate.move, piece = game.board[move.from]?.[1], capture = Boolean(game.board[move.to]);
@@ -161,12 +167,16 @@ export class UciEngine {
   }
   async search(game) {
     const legal = legalMoves(game); if (!legal.length) return null;
-    const count = Math.min(4, legal.length), strength = engineStrength(game), iterations = new Map();
+    const strength = engineStrength(game),count = Math.min(strength.multiPv, legal.length),iterations = new Map();
+    const analysis={depth:0,nodes:0,timeMs:0};
     this.option('MultiPV', count);
     if (this.lastGame !== game.id) { this.write('ucinewgame'); this.lastGame = game.id; }
     await this.command('isready', line => line === 'readyok', this.startupMs);
     this.write(enginePosition(game));
     this.onInfo = line => {
+      for(const [field,pattern] of [['depth',/\bdepth (\d+)/],['nodes',/\bnodes (\d+)/],['timeMs',/\btime (\d+)/]]){
+        const match=line.match(pattern);if(match)analysis[field]=Math.max(analysis[field],Number(match[1]));
+      }
       const depth = line.match(/\bdepth (\d+)/), score = line.match(/\bscore (cp|mate) (-?\d+)/), pv = line.match(/\bpv (\S+)/);
       if (!depth || !score || !pv || /\b(?:lowerbound|upperbound)\b/.test(line)) return;
       const number = Number(score[2]);
@@ -178,12 +188,15 @@ export class UciEngine {
     };
     let best;
     try {
-      best = await this.command(`go depth ${strength.depth} movetime ${strength.ms} searchmoves ${legal.map(move => moveToUci(game.kind, move)).join(' ')}`, line => line.startsWith('bestmove '), strength.ms + 2000);
+      best = await this.command(`go ${strength.depth?`depth ${strength.depth} `:''}movetime ${strength.ms} searchmoves ${legal.map(move => moveToUci(game.kind, move)).join(' ')}`, line => line.startsWith('bestmove '), strength.ms + 2000);
     } finally { this.onInfo = null; }
     const complete = [...iterations].filter(([, lines]) => lines.size === count).sort((a, b) => b[0] - a[0])[0];
     const candidates = complete ? [...complete[1].values()] : [{ uci: best.split(/\s+/)[1], score: 0 }];
-    const chosen = selectEngineCandidate(game, candidates, legal);
-    return chosen ? { move: chosen.move, engine: { id: this.config.id, name: this.name, style: chosen.style, styleName: ENGINE_STYLE_NAMES[chosen.style] } } : null;
+    // At full strength use the engine's final decision, including improvements
+    // from a partial last iteration. Earlier MultiPV lines can be stale.
+    const finalMove=legal.find(move=>moveToUci(game.kind,move)===best.split(/\s+/)[1]);
+    const chosen = strength.loss===0?(finalMove?{move:finalMove,style:'precise'}:null):selectEngineCandidate(game, candidates, legal);
+    return chosen ? { move: chosen.move, engine: { id: this.config.id, name: this.name, style: chosen.style, styleName: ENGINE_STYLE_NAMES[chosen.style] },analysis } : null;
   }
   async close() {
     if (!this.child || this.exited) return;

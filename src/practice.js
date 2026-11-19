@@ -179,7 +179,7 @@ export class PracticeService {
     if(this.closed)return;
     if(!move)try{move=await new Promise((resolve,reject)=>{
       const worker=new Worker(new URL('./bot-worker.js',import.meta.url),{workerData:snapshot});this.workers.add(worker);
-      const timer=setTimeout(()=>{worker.terminate();reject(new Error('Bot computation deadline'));},2500);
+      const timer=setTimeout(()=>{worker.terminate();reject(new Error('Bot computation deadline'));},4500);
       const finish=()=>{clearTimeout(timer);this.workers.delete(worker);};
       // Node --watch also posts dependency-tracking messages on this channel.
       // Only our explicit envelope contains a playable bot result.
