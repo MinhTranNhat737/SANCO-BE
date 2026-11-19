@@ -23,7 +23,7 @@ export function createPractice(kind, humanSide, difficulty, id) {
   const game = { id, kind, difficulty, humanSide, version: 0, rules: `${kind}-practice-v1`, phase: 'playing', turn: boardSide(kind),
     board: kind==='commander'?initialCommander():ABSTRACT_KINDS.includes(kind)?abstractInitial(kind):kind==='caro'?Array(225).fill(null):kind==='chess'?chessBoard(chess):discKinds.includes(kind)?initialDiscs(kind):GRID_KINDS.includes(kind)?initialGrid(kind):PARTY_KINDS.includes(kind)?Array(kind==='ludo'?225:169).fill(null):initialXiangqi(),
     moves: [], result: null, check: false, checkSquare: null, createdAt: Date.now(), noCapture: 0, repetitions: {},
-    ...(chess ? { fen: DEFAULT_POSITION } : {}) };
+    ...(chess ? { fen: DEFAULT_POSITION, initialFen: DEFAULT_POSITION } : {}) };
   game.initialBoard = [...game.board]; game.repetitions[positionKey(game)]=1;
   if(kind==='commander'){game.commander={scores:{r:0,b:0},pending:[]};game.rules=COMMANDER_RULE;}
   if(kind==='go'){game.seenPositions={[game.board.map(v=>v||'.').join('')]:true};game.passes=0;game.prisoners={B:0,W:0};}

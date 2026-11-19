@@ -9,11 +9,14 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --import ./test/environment.mjs --test test/*.test.js",
     "bench": "node scripts/bench-online.mjs",
     "bench:rooms": "node scripts/bench-rooms.mjs",
     "test:online": "node scripts/test-online.mjs",
-    "db:migrate": "node src/migrate.js"
+    "db:migrate": "node src/migrate.js",
+    "test:engines": "node --test test/native-engines.integration.mjs",
+    "engines:install": "node scripts/install-engines.mjs",
+    "heroku-postbuild": "node scripts/install-engines.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",

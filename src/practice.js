@@ -4,6 +4,7 @@ import {availableParallelism} from 'node:os';
 import {GameError} from './game.js';
 import {digest} from './auth.js';
 import {playerRatings,selectBot,settleRating} from './ratings.js';
+import {NativeBotService} from './native-engine.js';
 import {createPractice,boardSide,legalMoves,makePracticeMove,practiceView,endPractice,oppositeSide,undoHumanTurn} from './practice-engine.js';
 
 export const PRACTICE_INACTIVITY_MS = 5 * 60 * 1000;
@@ -11,6 +12,8 @@ export const PRACTICE_INACTIVITY_MS = 5 * 60 * 1000;
 export class PracticeService {
   constructor(db,onChange=()=>{},options={}){
     this.db=db;this.onChange=onChange;
+    this.nativeBots=options.nativeBots||new NativeBotService(options.engines);
+    this.engineWarnings=new Set();
     const workerCount=Number(options.botWorkers??process.env.BOT_WORKERS??Math.max(1,Math.min(4,availableParallelism()-1)));
     if(!Number.isInteger(workerCount)||workerCount<1||workerCount>16)throw new Error('BOT_WORKERS must be an integer from 1 to 16');
     this.botWorkers=workerCount;
@@ -156,8 +159,11 @@ export class PracticeService {
   async runBot(id){
     const {state:snapshot}=await this.read(id);if(this.closed||snapshot.phase!=='playing'||snapshot.turn===snapshot.humanSide)return;
     this.attemptedVersions.set(id,snapshot.version);
-    let move;
-    try{move=await new Promise((resolve,reject)=>{
+    let move,engine;
+    try{const answer=await this.nativeBots.chooseMove(snapshot);if(answer){move=answer.move;engine=answer.engine;}}
+    catch(error){if(!this.closed&&!this.engineWarnings.has(snapshot.kind)){this.engineWarnings.add(snapshot.kind);console.warn(`Native ${snapshot.kind} engine unavailable; using internal bot: ${error.message}`);}}
+    if(this.closed)return;
+    if(!move)try{move=await new Promise((resolve,reject)=>{
       const worker=new Worker(new URL('./bot-worker.js',import.meta.url),{workerData:snapshot});this.workers.add(worker);
       const timer=setTimeout(()=>{worker.terminate();reject(new Error('Bot computation deadline'));},2500);
       const finish=()=>{clearTimeout(timer);this.workers.delete(worker);};
@@ -173,9 +179,10 @@ export class PracticeService {
       if(this.closed)return null;
       const row=await this.read(id,null,client,true),game=row.state;
       if(game.version!==snapshot.version||game.phase!=='playing'||game.turn===game.humanSide)return null;
+      if(engine)game.botEngine=engine;else delete game.botEngine;
       makePracticeMove(game,move);await this.persist(client,game,row.player_id);return {game,actor:row.player_id};
     });
     if(output)this.changed(output.game,output.actor);
   }
-  async close(){this.closed=true;clearTimeout(this.sweepTimer);this.sweepTimer=null;for(const t of this.delayTimers.values())clearTimeout(t);this.delayTimers.clear();this.queue=[];await Promise.all([...this.workers].map(worker=>worker.terminate()));}
+  async close(){this.closed=true;clearTimeout(this.sweepTimer);this.sweepTimer=null;for(const t of this.delayTimers.values())clearTimeout(t);this.delayTimers.clear();this.queue=[];await Promise.all([this.nativeBots.close(),...[...this.workers].map(worker=>worker.terminate())]);}
 }

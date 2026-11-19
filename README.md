@@ -29,6 +29,8 @@ Mật khẩu dùng scrypt, cookie phiên HttpOnly; database chỉ giữ hash c�
 
 ## Chơi với máy
 
+Cờ vua và cờ tướng có Stockfish/Fairy-Stockfish NNUE, MultiPV và lối chơi thay đổi giữa các ván. Xem [cài đặt engine, giới hạn tài nguyên và kiểm thử](ENGINES.md). Chạy `npm run engines:install` trước khi dùng local; Heroku/Docker cài trong bước build.
+
 ```text
 GET  /api/practice
 POST /api/practice                  { kind, difficulty, side }
