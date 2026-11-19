@@ -39,7 +39,33 @@ function validateOffer(g,offer){const p=g.party,from=player(g,offer.from),to=pla
   else{demand(money(offer.pay)&&money(offer.ask),'Số tiền giao dịch không hợp lệ.');demand(from.cash>=offer.pay&&to.cash>=offer.ask,'Một bên không đủ tiền thực hiện giao dịch.');for(const [list,side]of[[offer.give,from.side],[offer.take,to.side]]){demand(Array.isArray(list)&&list.length<=48&&new Set(list).size===list.length,'Danh sách đất không hợp lệ.');demand(list.every(i=>canTrade(p,i,side)),'Chỉ đổi đất đang sở hữu, không thế chấp và không có nhà trong nhóm.');}demand(offer.pay+offer.ask+offer.give.length+offer.take.length>0,'Giao dịch đang trống.');}
 }
 function resumeDeal(g){const p=g.party,deal=p.pending;p.pending=null;g.turn=deal.from;p.stage=deal.resume;if(p.stage==='buy'&&p.property[player(g).position])p.stage='end';}
-function nextAuction(g){const p=g.party,a=p.auction,eligible=alive(p).filter(v=>!a.passed.includes(v.side));if((a.leader&&eligible.every(v=>v.side===a.leader))||!eligible.length){if(a.leader){const buyer=player(g,a.leader);if(buyer?.active&&buyer.cash>=a.bid){buyer.cash-=a.bid;p.property[a.lot]=a.leader;ledger(g,'auction',`${a.leader} thắng đấu giá ${VN_CELLS[a.lot].name} · ${a.bid} triệu`,a.bid);}}const original=a.returnSide;p.auction=null;g.turn=original;p.stage='end';if(!player(g)?.active)nextTurn(g);return;}const at=p.sides.indexOf(g.turn);for(let n=1;n<=p.sides.length;n++){const side=p.sides[(at+n)%p.sides.length];if(eligible.some(v=>v.side===side)&&side!==a.leader){g.turn=side;return;}}}
+function nextAuction(g){
+  const p=g.party,a=p.auction,eligible=alive(p).filter(v=>!a.passed.includes(v.side));
+  if((a.leader&&eligible.every(v=>v.side===a.leader))||!eligible.length){
+    const original=a.returnSide;
+    if(a.leader){
+      const buyer=player(g,a.leader);
+      if(buyer?.active&&buyer.cash>=a.bid){
+        buyer.cash-=a.bid;
+        p.property[a.lot]=a.leader;
+        p.lastPurchase={lot:a.lot,side:a.leader,price:a.bid,source:'auction',at:Date.now()};
+        ledger(g,'auction',`${a.leader} thắng đấu giá ${VN_CELLS[a.lot].name} · ${a.bid} triệu`,a.bid);
+      }
+      p.auction=null;g.turn=original;p.stage='end';
+      if(!player(g)?.active)nextTurn(g);
+      return;
+    }
+    ledger(g,'auction',`Đấu giá ${VN_CELLS[a.lot].name} không có ai mua · Bỏ qua lượt`);
+    p.auction=null;g.turn=original;
+    nextTurn(g);
+    return;
+  }
+  const at=p.sides.indexOf(g.turn);
+  for(let n=1;n<=p.sides.length;n++){
+    const side=p.sides[(at+n)%p.sides.length];
+    if(eligible.some(v=>v.side===side)&&side!==a.leader){g.turn=side;return;}
+  }
+}
 export function vietnamLegal(g){if(g.phase!=='playing')return [];const p=g.party,me=player(g);if(!me?.active)return [];
   if(p.stage==='deal')return [option('accept'),option('reject')];
   if(p.stage==='auction')return [...(me.cash>=p.auction.bid+10?[option('bid')]:[]),option('pass_bid')];
@@ -54,7 +80,7 @@ export function vietnamLegal(g){if(g.phase!=='playing')return [];const p=g.party
   }
   if(p.stage==='debt')return [...moves,option('bankrupt')];
   if(p.stage==='roll'){moves.unshift(option('roll'));if(me.jail&&me.cash>=100)moves.push(option('pay_jail'));if(me.jail&&me.jailCards)moves.push(option('jail_card'));}
-  else if(p.stage==='buy'){if(me.cash>=VN_CELLS[me.position].price)moves.unshift(option('buy',me.position));moves.push(option('auction'));}
+  else if(p.stage==='buy'){if(me.cash>=VN_CELLS[me.position].price)moves.unshift(option('buy',me.position));moves.push(option('auction'),option('skip_buy'));}
   else moves.unshift(option('end'));
   if(freeStage(p)){moves.push(option('gift'),option('offer'),option('loan'));for(const l of p.loans)if(l.status==='open'&&l.borrower===me.side&&me.cash>=l.total)moves.push(option('repay',l.id));}
   return moves;
@@ -66,7 +92,8 @@ export function vietnamMove(g,request,roll){const p=g.party,me=player(g),action=
     if(me.jail){me.jail--;if(doubles){me.jail=0;p.extraRoll=false;}else if(me.jail>0){p.message=`Không có đôi. Còn ${me.jail} lượt tù.`;nextTurn(g);return {label:p.message,die,dice:values};}else{bill(g,100,null,'Hết 3 lượt tù');p.extraRoll=false;}}
     else{p.doubleCount=doubles?p.doubleCount+1:0;p.extraRoll=doubles;if(p.doubleCount===3){jail(g);return {label:p.message,die,dice:values};}}
     const origin=me.position,next=origin+p.dice;me.laps+=Math.floor(next/48);me.cash+=Math.floor(next/48)*config.salary;me.position=next%48;card=landing(g,roll);p.movement={side:me.side,from:origin,to:me.position,steps:p.dice,teleport:me.position!==next%48};dueLoans(g);p.resumeStage=p.stage;ledger(g,'roll',`${me.side} gieo ${values.join(' + ')} · ${p.message}`);settle(g);
-  }else if(action==='buy'){const c=VN_CELLS[to];me.cash-=c.price;p.property[to]=me.side;p.stage='end';ledger(g,'purchase',`${me.side} mua ${c.name} · ${c.price} triệu`,c.price);}
+  }else if(action==='buy'){const c=VN_CELLS[to];me.cash-=c.price;p.property[to]=me.side;p.lastPurchase={lot:to,side:me.side,price:c.price,source:'buy',at:Date.now()};p.stage='end';ledger(g,'purchase',`${me.side} mua ${c.name} · ${c.price} triệu`,c.price);}
+  else if(action==='skip_buy'){const c=VN_CELLS[me.position];ledger(g,'skip',`${me.side} bỏ qua ${c.name} · Bỏ qua lượt`);nextTurn(g);}
   else if(action==='end'){if(p.extraRoll&&!me.jail){p.stage='roll';p.extraRoll=false;p.dice=null;p.diceValues=[];}else nextTurn(g);}
   else if(action==='pay_jail'||action==='jail_card'){if(action==='pay_jail')me.cash-=100;else me.jailCards--;me.jail=0;ledger(g,'jail',`${me.side} ra tù`);}
   else if(action==='build'){const c=VN_CELLS[to];me.cash-=c.buildCost;p.houses[to]++;if(p.houses[to]===5){p.bank.hotels--;p.bank.houses+=4;}else p.bank.houses--;ledger(g,'build',`${me.side} xây ${p.houses[to]===5?'khách sạn':'nhà'} tại ${c.name}`,c.buildCost);}
@@ -79,9 +106,9 @@ export function vietnamMove(g,request,roll){const p=g.party,me=player(g),action=
   else if(action==='offer'||action==='loan'){const offer={id:p.sequence+1,kind:action==='loan'?'loan':'trade',from:me.side,to:d.partner,resume:p.stage,...(action==='loan'?{principal:d.principal,interest:d.interest,term:d.term}:{pay:d.pay,ask:d.ask,give:d.give,take:d.take})};validateOffer(g,offer);p.pending=offer;p.stage='deal';g.turn=offer.to;ledger(g,'offer',`${offer.from} gửi ${offer.kind==='loan'?'hợp đồng vay':'đề nghị trao đổi'} cho ${offer.to}`);}
   else if(action==='accept'||action==='reject'){const offer=p.pending;demand(offer?.to===me.side,'Bạn không phải người nhận đề nghị.');if(action==='accept'){validateOffer(g,offer);const from=player(g,offer.from);if(offer.kind==='loan'){from.cash-=offer.principal;me.cash+=offer.principal;p.loans.push({id:offer.id,lender:from.side,borrower:me.side,principal:offer.principal,total:offer.principal+Math.ceil(offer.principal*offer.interest/100),interest:offer.interest,dueLap:me.laps+offer.term,status:'open'});}else{from.cash+=offer.ask-offer.pay;me.cash+=offer.pay-offer.ask;for(const i of offer.give)p.property[i]=me.side;for(const i of offer.take)p.property[i]=from.side;}ledger(g,'contract',`${me.side} chấp nhận đề nghị #${offer.id}`);}else ledger(g,'reject',`${me.side} từ chối đề nghị #${offer.id}`);resumeDeal(g);}
   else if(action==='repay'){const loan=p.loans.find(l=>l.id===to&&l.borrower===me.side&&l.status==='open');demand(loan&&me.cash>=loan.total,'Không đủ tiền trả khoản vay.');me.cash-=loan.total;const lender=player(g,loan.lender);if(lender?.active)lender.cash+=loan.total;loan.status='repaid';ledger(g,'repay',`${me.side} tất toán vay #${loan.id} · ${loan.total} triệu`,loan.total);}
-  else if(action==='auction'){p.auction={lot:me.position,bid:0,leader:null,passed:[],returnSide:me.side};p.stage='auction';ledger(g,'auction',`Mở đấu giá ${VN_CELLS[me.position].name}`);nextAuction(g);}
-  else if(action==='bid'){const a=p.auction;demand(money(d.amount,a.bid+10)&&d.amount<=me.cash,'Giá đấu phải cao hơn ít nhất 10 và không vượt số dư.');a.bid=d.amount;a.leader=me.side;ledger(g,'bid',`${me.side} đấu ${d.amount} triệu cho ${VN_CELLS[a.lot].name}`,d.amount);nextAuction(g);}
-  else if(action==='pass_bid'){p.auction.passed.push(me.side);nextAuction(g);}
+  else if(action==='auction'){p.auction={lot:me.position,bid:0,leader:null,passed:[],returnSide:me.side,history:[]};p.stage='auction';ledger(g,'auction',`Mở đấu giá ${VN_CELLS[me.position].name}`);nextAuction(g);}
+  else if(action==='bid'){const a=p.auction;demand(money(d.amount,a.bid+10)&&d.amount<=me.cash,'Giá đấu phải cao hơn ít nhất 10 và không vượt số dư.');a.bid=d.amount;a.leader=me.side;(a.history||=[]).push({side:me.side,action:'bid',amount:d.amount,at:Date.now()});ledger(g,'bid',`${me.side} đấu ${d.amount} triệu cho ${VN_CELLS[a.lot].name}`,d.amount);nextAuction(g);}
+  else if(action==='pass_bid'){p.auction.passed.push(me.side);(p.auction.history||=[]).push({side:me.side,action:'pass',at:Date.now()});nextAuction(g);}
   else if(action==='bankrupt')eliminateVietnam(g,me.side,'bankrupt');
   return {label:p.message,...(die?{die,dice:values}:{}),...(card?{card}:{})};
 }

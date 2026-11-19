@@ -84,3 +84,30 @@ test('Monopoly rooms support up to 8 players with unique sides and default to ca
     await assert.rejects(()=>rooms.create(users[0],5,'ludo','first',5),/Số người không hợp lệ/);
   }finally{rooms.close();await db.close();}
 });
+test('Skipping an unowned lot skips auction and ends turn; empty auction also skips turn immediately',()=>{
+  const g=create(),p=g.party;
+  p.players[0].position=1;p.stage='buy';
+  move(g,'skip_buy');
+  assert.equal(p.property[1],null);
+  assert.equal(p.auction,null);
+  assert.equal(g.turn,'G');
+  assert.equal(p.stage,'roll');
+
+  p.players[1].position=2;p.stage='buy';
+  move(g,'auction');
+  assert.equal(g.turn,'R');
+  move(g,'pass_bid');
+  assert.equal(g.turn,'G');
+  move(g,'pass_bid');
+  assert.equal(p.property[2],null);
+  assert.equal(p.auction,null);
+  assert.equal(g.turn,'R');
+  assert.equal(p.stage,'roll');
+
+  p.players[0].position=3;p.stage='buy';
+  move(g,'buy',3);
+  assert.equal(p.property[3],'R');
+  assert.equal(p.lastPurchase.lot,3);
+  assert.equal(p.lastPurchase.side,'R');
+  assert.equal(p.lastPurchase.source,'buy');
+});
