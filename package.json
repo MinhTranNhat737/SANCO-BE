@@ -10,11 +10,12 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "test": "node --import ./test/environment.mjs --test test/*.test.js",
+    "test:engines": "node --test test/native-engines.integration.mjs",
     "bench": "node scripts/bench-online.mjs",
     "bench:rooms": "node scripts/bench-rooms.mjs",
     "test:online": "node scripts/test-online.mjs",
     "db:migrate": "node src/migrate.js",
-    "test:engines": "node --test test/native-engines.integration.mjs",
+    "oauth:check": "node scripts/check-oauth.mjs",
     "engines:install": "node scripts/install-engines.mjs",
     "heroku-postbuild": "node scripts/install-engines.mjs"
   },

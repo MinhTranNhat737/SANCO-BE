@@ -1,6 +1,40 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApplication } from '../src/app.js';
+import { createOAuthService } from '../src/oauth.js';
+
+test('OAuth accepts explicit callback URLs and a configured Facebook Graph version', async () => {
+  const oauth = createOAuthService({
+    db: null,
+    allowedOrigins: ['https://sanco.games'],
+    secureCookies: true,
+    config: {
+      googleClientId: 'g-id', googleClientSecret: 'g-secret',
+      facebookAppId: 'fb-id', facebookAppSecret: 'fb-secret',
+      googleRedirectUri: 'https://sanco.games/api/auth/google/callback',
+      facebookRedirectUri: 'https://sanco.games/api/auth/facebook/callback',
+      facebookGraphVersion: 'v25.0', stateSecret: 'test-state-secret',
+    },
+  });
+  assert.deepEqual(oauth.providers(), { google: true, facebook: true });
+  for (const provider of ['google', 'facebook']) {
+    let target;
+    const req = { headers: {}, query: { returnTo: 'https://untrusted.example' } };
+    const res = { cookie() {}, redirect(url) { target = new URL(url); } };
+    await oauth.start(provider, req, res);
+    assert.equal(target.searchParams.get('redirect_uri'), `https://sanco.games/api/auth/${provider}/callback`);
+    const state = JSON.parse(Buffer.from(target.searchParams.get('state').split('.')[0], 'base64url'));
+    assert.equal(state.returnTo, 'https://sanco.games');
+    if (provider === 'facebook') assert.equal(target.pathname, '/v25.0/dialog/oauth');
+  }
+});
+
+test('OAuth rejects an invalid Facebook Graph version', () => {
+  assert.throws(() => createOAuthService({
+    db: null, allowedOrigins: [], secureCookies: false,
+    config: { facebookGraphVersion: '../oauth' },
+  }), /FACEBOOK_GRAPH_VERSION/);
+});
 
 function fakeOAuthFetch() {
   return async (url) => {
@@ -16,10 +50,10 @@ function fakeOAuthFetch() {
         name: 'Minh Google',
       }), { status: 200 });
     }
-    if (u.startsWith('https://graph.facebook.com/v20.0/oauth/access_token')) {
+    if (u.startsWith('https://graph.facebook.com/v26.0/oauth/access_token')) {
       return new Response(JSON.stringify({ access_token: 'fb-access-token' }), { status: 200 });
     }
-    if (u.startsWith('https://graph.facebook.com/v20.0/me')) {
+    if (u.startsWith('https://graph.facebook.com/v26.0/me')) {
       return new Response(JSON.stringify({
         id: 'fb-user-999',
         name: 'Minh Facebook',
@@ -108,6 +142,8 @@ test('Only logged-in accounts can create rooms, and Google/Facebook OAuth preser
     assert.equal(fbStart.status, 302);
     const fbAuthUrl = new URL(fbStart.headers.get('location'));
     assert.equal(fbAuthUrl.origin, 'https://www.facebook.com');
+    assert.equal(fbAuthUrl.pathname, '/v26.0/dialog/oauth');
+    assert.equal(fbAuthUrl.searchParams.get('redirect_uri'), 'https://api.sanco.games/api/auth/facebook/callback');
     const fbStateCookie = fbStart.headers.get('set-cookie').split(';')[0];
 
     const fbCb = await fetch(`${origin}/api/auth/facebook/callback?code=fb-code&state=${encodeURIComponent(fbAuthUrl.searchParams.get('state'))}`, {

@@ -1,5 +1,7 @@
 # Sân Cờ — Backend Node.js
 
+Đăng nhập Google/Facebook: xem [hướng dẫn tạo ứng dụng, cấu hình local HTTPS và sanco.games](OAUTH-SETUP.md). Chạy `npm run oauth:check` để kiểm tra biến môi trường mà không hiển thị secret.
+
 Kiểm tra đăng ký, đăng nhập, tạo phòng, đồng bộ nước đi và lưu dữ liệu sau
 khởi động lại bằng `npm run test:online`. Script dùng HTTP/WebSocket thật
 với database tạm riêng, tự dọn khi xong. Xem kết quả đo và giới hạn tại

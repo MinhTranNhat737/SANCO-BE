@@ -2,5 +2,9 @@ node_modules/
 .data/
 .engines/
 .env
+.env.*
+!.env.example
+client_secret*.json
+.certs/
 coverage/
 *.log
