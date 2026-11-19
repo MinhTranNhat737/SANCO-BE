@@ -1,4 +1,4 @@
-import { randomUUID, randomBytes } from 'node:crypto';
+import { randomUUID, randomBytes, randomInt } from 'node:crypto';
 import { GameError, newGame, other, applyAction, settleTimeout, seatOf, publicRoom, KINDS, boardSide, seats, clockDeadline, startRoomGame } from './room-game.js';
 import { COMMANDER_DURATION_MS } from './commander.js';
 import {PARTY_KINDS,PARTY_SIDES,MONOPOLY_SIDES} from './party-games.js';
@@ -138,13 +138,17 @@ export class RoomService {
     await this.pruneInactive();
     const { rows } = await this.db.query("SELECT count(*)::integer AS n FROM rooms WHERE owner_id=$1 AND state->'game'->>'phase'='waiting'", [user.id]);
     if (rows[0].n >= 10) throw new GameError('Bạn đã có 10 phòng chờ. Hãy dùng một phòng đang có.', 429);
-    const token = secret(), now = Date.now(), mark = boardSide(kind,side==='random'?!!(randomBytes(1)[0]%2):side==='first');
+    const token = secret(), now = Date.now();
+    const partyPool = kind==='monopoly'?MONOPOLY_SIDES:PARTY_SIDES;
+    const mark = PARTY_KINDS.includes(kind)&&side==='random'
+      ? partyPool[randomInt(capacity)]
+      : boardSide(kind,side==='random'?!!(randomBytes(1)[0]%2):side==='first');
     for (let attempt = 0; attempt < 3; attempt++) {
       const id = randomBytes(4).toString('hex').toUpperCase();
       const room = { id, kind, ranked, version: 0, duration: minutes * 60000, createdAt: now, updatedAt: now,
         owner: { id: user.id, name: user.display_name, mark, ready: false, rematch: false }, guest: null,
         inviteHash: digest(token), inviteExpiresAt: now + 86400000, drawOffer: null, game: newGame(minutes * 60000, randomUUID(),kind,capacity) };
-      if(PARTY_KINDS.includes(kind)){room.capacity=capacity;room.players=[room.owner];}
+      if(PARTY_KINDS.includes(kind)){room.capacity=capacity;room.players=[room.owner];if(side==='random')room.randomSeats=true;}
       const out = await this.db.query('INSERT INTO rooms(id,owner_id,state,created_at,updated_at) VALUES($1,$2,$3,$4,$4) ON CONFLICT(id) DO NOTHING RETURNING id', [id, user.id, JSON.stringify(room), now]);
       if (out.rows.length) {
         void this.scheduleSweep();
@@ -193,7 +197,8 @@ export class RoomService {
       if (seats(room).length>=(room.capacity||2)) throw new GameError('Phòng đã đủ người.', 409);
       if (room.game.phase !== 'waiting') throw new GameError('Phòng không còn nhận người chơi.', 409);
       const partyPool=room.kind==='monopoly'?MONOPOLY_SIDES:PARTY_SIDES;
-      const next={id:actor.id,name:actor.display_name,mark:room.players?partyPool.slice(0,room.capacity).find(side=>!room.players.some(s=>s.mark===side)):other(room.owner.mark,room.kind),ready:false,rematch:false};
+      const openSeats=room.players?partyPool.slice(0,room.capacity).filter(side=>!room.players.some(s=>s.mark===side)):[];
+      const next={id:actor.id,name:actor.display_name,mark:room.players?(room.randomSeats?openSeats[randomInt(openSeats.length)]:openSeats[0]):other(room.owner.mark,room.kind),ready:false,rematch:false};
       if(room.players){room.players.push(next);if(!room.guest)room.guest=next;for(const s of room.players)s.ready=false;}else room.guest=next;
       if(room.players)for(const s of room.players)await client.query('INSERT INTO room_members(room_id,player_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[room.id,s.id]);
       room.owner.ready = false;

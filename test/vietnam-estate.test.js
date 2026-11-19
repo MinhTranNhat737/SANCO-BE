@@ -76,6 +76,10 @@ test('Monopoly rooms support up to 8 players with unique sides and default to ca
     for(const u of users)room=await rooms.act(room.id,u.id,{actionId:randomUUID(),version:room.version,action:'ready'});
     assert.equal(room.game.phase,'playing');
     assert.equal(room.game.turn,'R');
+    const rand=await rooms.create(users[0],60,'monopoly','random',8);
+    for(let i=1;i<8;i++)await rooms.join(rand.room.id,users[i],rand.token);
+    const randRoom=await rooms.get(rand.room.id,users[0].id);
+    assert.deepEqual(randRoom.players.map(p=>p.mark).sort(),['B','C','G','K','O','P','R','Y']);
     await assert.rejects(()=>rooms.create(users[0],60,'monopoly','first',9),/Số người không hợp lệ/);
     await assert.rejects(()=>rooms.create(users[0],5,'ludo','first',5),/Số người không hợp lệ/);
   }finally{rooms.close();await db.close();}
