@@ -1,8 +1,17 @@
-import {randomInt} from 'node:crypto';
+import {randomBytes} from 'node:crypto';
 import {newVietnam,vietnamLegal,vietnamMove,chooseVietnam,eliminateVietnam,vietnamWealth,VN_EDITION} from './vietnam-estate.js';
 export const PARTY_KINDS=['ludo','monopoly'];
 export const PARTY_SIDES=['R','G','Y','B'];
 export const MONOPOLY_SIDES=['R','G','Y','B','P','O','C','K'];
+/** Cryptographically unbiased die roll (1..6) using OS CSPRNG with strict rejection sampling (252 = 6 * 42). */
+export function trueRollDie(){
+  for(;;){
+    const buf=randomBytes(4);
+    for(let i=0;i<buf.length;i++){
+      if(buf[i]<252)return (buf[i]%6)+1;
+    }
+  }
+}
 export const SAFE_LUDO=[0,8,13,21,26,34,39,47];
 export const estateCells=Array.from({length:20},(_,i)=>({index:i,name:['Xuất phát','Sen','Trúc','Cơ hội','Mai','Thuế','Đào','Lan','Cơ hội','Cúc','Thăm tù','Sông','Núi','Cơ hội','Biển','Nghỉ chân','Mây','Gió','Cơ hội','Trăng'][i],type:i===0?'start':i===5?'tax':i===10?'jail':i===15?'rest':[3,8,13,18].includes(i)?'chance':'property',price:100+i*20,group:Math.floor((i%5)/2)+Math.floor(i/5)*2}));
 // Property groups pair adjacent property spaces on the ring, independent of corners/events.
@@ -50,7 +59,7 @@ function pay(game,amount,creditor){
   if(me.cash<amount){p.stage='debt';p.debt={amount,creditor};p.message=`Cần trả ${amount}. Bán tài sản hoặc phá sản.`;return;}
   me.cash-=amount;if(creditor)p.players.find(v=>v.side===creditor).cash+=amount;
 }
-export function partyMove(game,request,roll=()=>randomInt(1,7)){
+export function partyMove(game,request,roll=trueRollDie){
   if(game.party.edition===VN_EDITION)return vietnamMove(game,request,roll);
   const p=game.party,me=current(game),action=request.action||'move',to=request.to;
   if(action==='roll'){

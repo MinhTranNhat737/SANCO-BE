@@ -7,6 +7,7 @@ import {openDatabase} from '../src/database.js';
 import {createGuest} from '../src/auth.js';
 import {RoomService} from '../src/rooms.js';
 import {MONOPOLY_TURN_MS,newGame,startRoomGame,clockDeadline,settleTimeout} from '../src/room-game.js';
+import {trueRollDie} from '../src/party-games.js';
 const create=()=>createPractice('monopoly','R','medium',randomUUID());
 const move=(g,action,to=-1,details={})=>vietnamMove(g,{action,to,from:null,details},()=>1);
 
@@ -160,4 +161,20 @@ test('Monopoly rooms enforce a 30-second max turn limit and auto-advance on expi
   game.turnDeadline=t0+90_000;
   assert.equal(settleTimeout(room,t0+90_000),true);
   assert.ok(game.party.auction.passed.includes('Y'));
+});
+test('CSPRNG dice roll produces unbiased uniform independent outcomes across all 6 faces and 36 pairs',()=>{
+  const counts=Array(7).fill(0),pairs=new Set();
+  const N=3600;
+  for(let i=0;i<N;i++){
+    const a=trueRollDie(),b=trueRollDie();
+    assert.ok(Number.isInteger(a)&&a>=1&&a<=6);
+    assert.ok(Number.isInteger(b)&&b>=1&&b<=6);
+    counts[a]++;counts[b]++;
+    pairs.add(`${a},${b}`);
+  }
+  const expected=(N*2)/6;
+  for(let face=1;face<=6;face++){
+    assert.ok(Math.abs(counts[face]-expected)<expected*0.15,`Face ${face} count ${counts[face]} deviated too far from ${expected}`);
+  }
+  assert.equal(pairs.size,36,'All 36 independent pairs must occur');
 });
