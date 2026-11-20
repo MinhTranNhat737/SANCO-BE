@@ -7,7 +7,7 @@ import { openDatabase } from '../src/database.js';
 import { createGuest } from '../src/auth.js';
 import { RoomService } from '../src/rooms.js';
 import { PracticeService } from '../src/practice.js';
-import { MONOPOLY_TURN_MS, newGame, startRoomGame, clockDeadline, settleTimeout } from '../src/room-game.js';
+import { MONOPOLY_TURN_MS, MONOPOLY_ROLL_GRACE_MS, newGame, startRoomGame, clockDeadline, settleTimeout, applyAction } from '../src/room-game.js';
 import { trueRollDie } from '../src/party-games.js';
 const create = () => createPractice('monopoly', 'R', 'medium', randomUUID());
 const move = (g, action, to = -1, details = {}) => vietnamMove(g, { action, to, from: null, details }, () => 1);
@@ -276,4 +276,60 @@ test('Landing on opponent land allows buyout including building value when affor
   move(g, 'skip_buyout');
   assert.equal(g.turn, 'R', 'Declining buyout after rolling doubles keeps extra roll');
   assert.equal(p.stage, 'roll');
+});
+test('Monopoly supports unlimited or custom match duration and excludes dice roll time from the 30s turn clock', async () => {
+  const db = await openDatabase({ memory: true }), rooms = new RoomService(db);
+  try {
+    const [host, guest] = await Promise.all([createGuest(db), createGuest(db)]);
+    // Unlimited room (minutes = 0)
+    const unlim = await rooms.create(host, 0, 'monopoly', 'first', 2);
+    assert.equal(unlim.room.duration, 0);
+    assert.equal(unlim.room.game.unlimited, true);
+    assert.equal(unlim.room.game.matchLimitMs, null);
+    assert.equal(unlim.room.game.matchDeadline, undefined);
+
+    // Custom match duration (minutes = 45)
+    const timed = await rooms.create(host, 45, 'monopoly', 'first', 2);
+    assert.equal(timed.room.duration, 45 * 60_000);
+    assert.equal(timed.room.game.unlimited, false);
+    assert.equal(timed.room.game.matchLimitMs, 45 * 60_000);
+
+    // Reject out-of-range durations
+    await assert.rejects(() => rooms.create(host, 2, 'monopoly', 'first', 2), /Thời gian ván Tỷ phú/);
+    await assert.rejects(() => rooms.create(host, 400, 'monopoly', 'first', 2), /Thời gian ván Tỷ phú/);
+
+    // Verify 30s thinking clock excludes dice roll + walk grace window
+    const t0 = 2_000_000;
+    const g = newGame(45 * 60_000, 'roll-grace-test', 'monopoly', 2);
+    const room = {
+      kind: 'monopoly',
+      duration: 45 * 60_000,
+      owner: { id: host.id, name: host.name, mark: 'R', ready: true },
+      players: [
+        { id: host.id, name: host.name, mark: 'R', ready: true },
+        { id: guest.id, name: guest.name, mark: 'G', ready: true },
+      ],
+      game: g,
+    };
+    startRoomGame(g, t0);
+    assert.equal(g.matchDeadline, t0 + 45 * 60_000);
+    assert.equal(g.turnThinkStartAt, t0);
+    assert.equal(g.turnDeadline, t0 + 30_000);
+
+    const tRoll = t0 + 5_000;
+    applyAction(room, host.id, 'move', { action: 'roll', to: -1 }, tRoll);
+    assert.ok(g.turnThinkStartAt >= tRoll + MONOPOLY_ROLL_GRACE_MS, '30s thinking timer must start after roll + walk grace window');
+    assert.equal(g.turnDeadline, g.turnThinkStartAt + 30_000, 'Full 30s thinking budget must be preserved after dice roll');
+
+    // Timed match expires at matchDeadline and settles by net wealth
+    g.party.players[0].cash = 5000;
+    g.party.players[1].cash = 1000;
+    assert.equal(settleTimeout(room, t0 + 45 * 60_000), true);
+    assert.equal(g.phase, 'finished');
+    assert.equal(g.result.reason, 'wealth');
+    assert.equal(g.result.winner, 'R');
+  } finally {
+    rooms.close();
+    await db.close();
+  }
 });

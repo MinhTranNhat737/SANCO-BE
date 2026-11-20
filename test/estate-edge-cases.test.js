@@ -19,7 +19,7 @@ test('A current player resigning without a creditor releases their land and retu
 
 test('A non-current player resigning does not renew the current player turn deadline',()=>{
   const room=readyRoom(),g=room.game;const before=clockDeadline(g);
-  applyAction(room,'c','resign',{},11000,'next');assert.equal(g.turn,'R');assert.equal(g.remaining.R,3590000);assert.equal(g.turnStartedAt,11000);assert.equal(clockDeadline(g),before);
+  applyAction(room,'c','resign',{},11000,'next');assert.equal(g.turn,'R');assert.equal(g.matchDeadline,3601000);assert.equal(g.turnStartedAt,11000);assert.equal(clockDeadline(g),before);
 });
 
 test('An auction observer resigning preserves bidder deadline; cancelling their deal gives the resumed turn fresh time',()=>{

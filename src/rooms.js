@@ -136,7 +136,9 @@ export class RoomService {
     if(!['first','second','random'].includes(side))throw new GameError('Bên quân không hợp lệ.');
     const maxCapacity=kind==='monopoly'?8:PARTY_KINDS.includes(kind)?4:2;
     if(!Number.isInteger(capacity)||capacity<2||capacity>maxCapacity)throw new GameError('Số người không hợp lệ.');
-    if (!(kind==='monopoly'?[3,5,10,15,30,60,120]:kind==='commander'?[3,5,10,15,30]:[3,5,10,15]).includes(minutes)) throw new GameError('Thời gian không hợp lệ cho môn cờ này.');
+    if(kind==='monopoly'){
+      if(!Number.isInteger(minutes)||(minutes!==0&&(minutes<5||minutes>360)))throw new GameError('Thời gian ván Tỷ phú phải là không giới hạn hoặc từ 5 đến 360 phút.');
+    }else if (!(kind==='commander'?[3,5,10,15,30]:[3,5,10,15]).includes(minutes)) throw new GameError('Thời gian không hợp lệ cho môn cờ này.');
     if(kind==='commander')minutes=COMMANDER_DURATION_MS/60_000;
     await this.pruneInactive();
     const { rows } = await this.db.query("SELECT count(*)::integer AS n FROM rooms WHERE owner_id=$1 AND state->'game'->>'phase'='waiting'", [user.id]);
