@@ -24,6 +24,7 @@ function safeEqual(a, b) {
 }
 
 export function createOAuthService({ db, allowedOrigins, secureCookies, fetchImpl = fetch, config = {} }) {
+  const providerFetch=(url,options={})=>fetchImpl(url,{...options,signal:AbortSignal.timeout(10000)});
   const facebookGraphVersion = config.facebookGraphVersion || process.env.FACEBOOK_GRAPH_VERSION || 'v26.0';
   if (!/^v\d+\.0$/.test(facebookGraphVersion)) throw new Error('FACEBOOK_GRAPH_VERSION must have the form v26.0');
   const stateSecret = () => config.stateSecret || process.env.OAUTH_STATE_SECRET || EPHEMERAL_SECRET;
@@ -164,14 +165,14 @@ export function createOAuthService({ db, allowedOrigins, secureCookies, fetchImp
 
   async function exchangeGoogle(code, callbackUrl) {
     const { id, secret } = creds('google');
-    const tokenRes = await fetchImpl('https://oauth2.googleapis.com/token', {
+    const tokenRes = await providerFetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ code, client_id: id, client_secret: secret, redirect_uri: callbackUrl, grant_type: 'authorization_code' }),
     });
     const tokenData = await tokenRes.json().catch(() => null);
     if (!tokenRes.ok || !tokenData?.access_token) throw new Error('Không xác thực được với Google.');
-    const userRes = await fetchImpl('https://openidconnect.googleapis.com/v1/userinfo', {
+    const userRes = await providerFetch('https://openidconnect.googleapis.com/v1/userinfo', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const profile = await userRes.json().catch(() => null);
@@ -188,12 +189,12 @@ export function createOAuthService({ db, allowedOrigins, secureCookies, fetchImp
     const { id, secret } = creds('facebook');
     const tokenUrl = new URL(`https://graph.facebook.com/${facebookGraphVersion}/oauth/access_token`);
     tokenUrl.search = new URLSearchParams({ client_id: id, client_secret: secret, redirect_uri: callbackUrl, code }).toString();
-    const tokenRes = await fetchImpl(tokenUrl.toString());
+    const tokenRes = await providerFetch(tokenUrl.toString());
     const tokenData = await tokenRes.json().catch(() => null);
     if (!tokenRes.ok || !tokenData?.access_token) throw new Error('Không xác thực được với Facebook.');
     const profileUrl = new URL(`https://graph.facebook.com/${facebookGraphVersion}/me`);
     profileUrl.search = new URLSearchParams({ fields: 'id,name,email', access_token: tokenData.access_token }).toString();
-    const userRes = await fetchImpl(profileUrl.toString());
+    const userRes = await providerFetch(profileUrl.toString());
     const profile = await userRes.json().catch(() => null);
     if (!userRes.ok || !profile?.id) throw new Error('Không lấy được thông tin tài khoản Facebook.');
     return {

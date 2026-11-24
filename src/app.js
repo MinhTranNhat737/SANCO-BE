@@ -15,6 +15,8 @@ import { credentials, createGuest, hashPassword, verifyPassword, sessionFor, iss
 import { createOAuthService } from './oauth.js';
 import {playerRatings,leaderboard,myLeaderboardPosition,botRoster,RANKS,INITIAL_ELO,PLACEMENT_GAMES} from './ratings.js';
 import {Matchmaking,matchPresets} from './matchmaking.js';
+import {createTrafficGuard,concurrencyGuard} from './traffic-guard.js';
+import proxyaddr from 'proxy-addr';
 
 export async function createApplication(options = {}) {
   const db = options.db || await openDatabase(options.database);
@@ -22,9 +24,11 @@ export async function createApplication(options = {}) {
   const allowedOrigins = (options.origins || process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5173,http://localhost:5173').split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
   const secureCookies = options.secureCookies ?? (process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production');
   const allowedOrigin = origin => !origin || allowedOrigins.includes(origin);
+  const traffic=createTrafficGuard({disabled:options.disableRateLimits});
+  const socketIp=req=>proxyaddr(req,app.get('trust proxy fn')||(()=>false));
   const oauth = createOAuthService({ db, allowedOrigins, secureCookies, ...(options.oauth || {}) });
   // Reconnect resynchronizes from SQL. Avoid retaining every room packet in RAM.
-  const io = new Server(server, { maxHttpBufferSize: 16384, perMessageDeflate:false,cors: { origin: (origin, done) => done(null, allowedOrigin(origin)), credentials: true }, allowRequest: (req, done) => done(null, allowedOrigin(req.headers.origin)) });
+  const io = new Server(server, { maxHttpBufferSize: 16384, perMessageDeflate:false,cors: { origin: (origin, done) => done(null, allowedOrigin(origin)), credentials: true }, allowRequest: (req, done) => done(null, allowedOrigin(req.headers.origin)&&traffic.allow(`handshake:${socketIp(req)}`,120,60000).ok) });
   const online = id => (io.sockets.adapter.rooms.get(`player:${id}`)?.size || 0) > 0;
   const inactivityMs = Number.isFinite(options.inactivityMs) ? options.inactivityMs : Number(process.env.ROOM_INACTIVITY_MS || 5 * 60 * 1000);
   const rooms = new RoomService(db, room => {
@@ -46,6 +50,8 @@ export async function createApplication(options = {}) {
   const dummyHash = await hashPassword('timing-only-password-no-account');
   const matchmaking=new Matchmaking(db,rooms);
   const actionGate=createActionGate();
+  const passwordGate=createActionGate({maximum:4,perPlayer:2});
+  const passwordWork=(req,work)=>options.disableRateLimits?work():passwordGate(req.ip,work);
   const limits = new Map();
   const cleanup = setInterval(() => { const now = Date.now(); for (const [key, value] of limits) if (value.until < now) limits.delete(key); db.query('DELETE FROM sessions WHERE expires_at < $1', [now]).catch(() => {}); db.query('DELETE FROM rank_queue WHERE expires_at < $1 AND room_id IS NULL',[now-60_000]).catch(()=>{}); }, 60000);
   cleanup.unref();
@@ -60,10 +66,15 @@ export async function createApplication(options = {}) {
     if (['POST', 'PATCH'].includes(req.method) && !req.is('application/json')) return next(new GameError('Yêu cầu cần dùng JSON.', 415));
     next();
   });
+  app.use('/api',traffic.middleware('api',1200,60000));
+  if(!options.disableRateLimits)app.use('/api',concurrencyGuard());
+  // Bound concurrent password hashing across IPs as well as existing login limits.
+  if(!options.disableRateLimits)app.use(['/api/auth/login','/api/auth/register'],concurrencyGuard({maximum:4,perIp:2}));
   app.use(express.json({ limit: '16kb' }));
   const rate = (kind, maximum, windowMs) => (req, res, next) => {
     if (options.disableRateLimits) return next();
     const key = `${kind}:${req.ip}`, now = Date.now();
+    if(limits.size>=20000&&!limits.has(key))return next(new GameError('Máy chủ đang bận.',503));
     let bucket = limits.get(key);
     if (!bucket || bucket.until <= now) { bucket = { count: 0, until: now + windowMs }; limits.set(key, bucket); }
     if (++bucket.count > maximum) { res.set('Retry-After', String(Math.ceil((bucket.until - now) / 1000))); return next(new GameError('Bạn thao tác quá nhanh. Vui lòng thử lại sau.', 429)); }
@@ -97,7 +108,7 @@ export async function createApplication(options = {}) {
   app.post('/api/auth/register', required, rate('register', 8, 600000), async (req, res) => {
     if (req.user.account_id) throw new GameError('Bạn đã đăng nhập tài khoản.');
     const { email, password } = credentials(req.body), name = validName(req.body.name);
-    const passwordHash = await hashPassword(password);
+    const passwordHash = await passwordWork(req,()=>hashPassword(password));
     const id = randomUUID();
     try {
       await db.transaction(async client => {
@@ -115,7 +126,7 @@ export async function createApplication(options = {}) {
     const { email, password } = credentials(req.body);
     const previous = await sessionFor(db, req);
     const { rows } = await db.query('SELECT a.password_hash, a.email, p.id, p.display_name, p.account_id FROM accounts a JOIN players p ON p.account_id=a.id WHERE a.email=$1', [email]);
-    const valid = await verifyPassword(password, rows[0]?.password_hash || dummyHash);
+    const valid = await passwordWork(req,()=>verifyPassword(password, rows[0]?.password_hash || dummyHash));
     if (!rows[0] || !valid) throw new GameError('Email hoặc mật khẩu chưa đúng.', 401);
     if (previous && previous.id !== rows[0].id) {
       const active = await db.query("SELECT id FROM rooms WHERE (owner_id=$1 OR guest_id=$1) AND state->'game'->>'phase'='playing' LIMIT 1", [previous.id]);
@@ -192,11 +203,18 @@ export async function createApplication(options = {}) {
     res.status(status).json({ error: status === 500 ? 'Máy chủ gặp sự cố. Vui lòng thử lại.' : error.message });
   });
   io.use(async (socket, next) => {
-    try { const user = await sessionFor(db, socket.request); if (!user) return next(new Error('Phiên đã hết hạn.')); socket.data.user = user; next(); } catch { next(new Error('Không kết nối được máy chủ.')); }
+    if(!traffic.allow(`socket-auth:${socketIp(socket.request)}`,120,60000).ok){const error=new Error('Bạn thao tác quá nhanh.');error.data={status:429};return next(error);}
+    try { const user = await sessionFor(db, socket.request); if (!user) {const error=new Error('Phiên đã hết hạn.');error.data={status:401};return next(error);} socket.data.user = user; next(); } catch { next(new Error('Không kết nối được máy chủ.')); }
   });
   io.on('connection', socket => {
     const user = socket.data.user;
     socket.join(`player:${user.id}`); socket.join(`session:${user.token_hash}`);
+    socket.use(([event],next)=>{
+      if(!traffic.allow(`socket:${user.id}`,360,60000).ok)return next(new Error('Rate limited'));
+      if(event==='watch-room'&&!traffic.allow(`watch:${user.id}`,60,60000).ok)return next(new Error('Rate limited'));
+      next();
+    });
+    socket.on('error',()=>{});
     const expiry = setTimeout(() => socket.disconnect(true), Math.min(+user.expires_at - Date.now(), 2147483647)); expiry.unref();
     socket.on('net-ping',ack=>{if(typeof ack==='function')ack({serverNow:Date.now()});});
     for(const [event,service,key]of[['room-action',rooms,'room'],['practice-action',practice,'game']])socket.on(event,async(request,ack)=>{
@@ -213,6 +231,7 @@ export async function createApplication(options = {}) {
     socket.on('watch-room', async (id, ack) => {
       try {
         if (typeof id !== 'string' || !/^[A-F0-9]{8}$/.test(id)) return;
+        if(Date.now()>=+user.expires_at||!await sessionFor(db,socket.request))throw new GameError('Phiên đã hết hạn.',401);
         const view=await rooms.get(id,user.id);
         socket.data.roomId = id;
         if (typeof ack === 'function') ack({ ok: true,room:view });
