@@ -3,6 +3,8 @@ import { promisify } from 'node:util';
 import { GameError } from './game.js';
 const scrypt = promisify(scryptCallback);
 const sessionAge = 30 * 24 * 60 * 60 * 1000;
+export const GUEST_IDLE_MS = 15 * 60 * 1000;
+const guestSessionAge = 24 * 60 * 60 * 1000;
 export const digest = value => createHash('sha256').update(value).digest('hex');
 export const secret = () => randomBytes(32).toString('base64url');
 export const validName = value => {
@@ -46,22 +48,29 @@ export function sessionToken(request) {
 export async function sessionFor(db, request) {
   const token = sessionToken(request);
   if (!/^[\w-]{43}$/.test(token)) return null;
-  const { rows } = await db.query(`SELECT p.id, p.display_name, p.account_id, a.email, a.username, p.is_admin, p.suspended_at, s.token_hash, s.expires_at
+  const now = Date.now();
+  const { rows } = await db.query(`SELECT p.id, p.display_name, p.account_id, a.email, a.username, p.is_admin, p.suspended_at, s.token_hash, s.expires_at, COALESCE(s.last_seen_at,s.created_at) AS last_seen_at
     FROM sessions s JOIN players p ON p.id = s.player_id LEFT JOIN accounts a ON a.id = p.account_id
     WHERE s.token_hash = $1 AND s.expires_at > $2 AND p.suspended_at IS NULL`, [digest(token), Date.now()]);
-  return rows[0] || null;
+  const user = rows[0];
+  if (user && !user.account_id) {
+    if (Number(user.last_seen_at) < now-GUEST_IDLE_MS) return null;
+    if (Number(user.last_seen_at) < now-60000) await db.query('UPDATE sessions SET last_seen_at=$1 WHERE token_hash=$2', [now,user.token_hash]);
+  }
+  return user || null;
 }
 export function cookieOptions(secure, maxAge) {
   const sameSite = process.env.COOKIE_SAMESITE || (secure ? 'none' : 'lax');
   return { httpOnly: true, sameSite, secure: sameSite === 'none' ? true : secure, path: '/', ...(maxAge !== undefined ? { maxAge } : {}) };
 }
 export async function issueSession(db, response, playerId, previousHash, secure) {
-  const player = await db.query('SELECT suspended_at FROM players WHERE id=$1', [playerId]);
+  const player = await db.query('SELECT suspended_at,account_id FROM players WHERE id=$1', [playerId]);
   if (player.rows[0]?.suspended_at != null) throw new GameError('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.', 403);
   const token = secret(), now = Date.now();
-  await db.query('INSERT INTO sessions(token_hash, player_id, expires_at, created_at) VALUES($1,$2,$3,$4)', [digest(token), playerId, now + sessionAge, now]);
+  const guest = !player.rows[0]?.account_id;
+  await db.query('INSERT INTO sessions(token_hash, player_id, expires_at, created_at, last_seen_at) VALUES($1,$2,$3,$4,$4)', [digest(token), playerId, now + (guest ? guestSessionAge : sessionAge), now]);
   if (previousHash) await db.query('DELETE FROM sessions WHERE token_hash = $1', [previousHash]);
-  response.cookie('sc_session', token, cookieOptions(secure, sessionAge));
+  response.cookie('sc_session', token, cookieOptions(secure, guest ? undefined : sessionAge));
 }
 export async function createGuest(db) {
   const id = randomUUID();

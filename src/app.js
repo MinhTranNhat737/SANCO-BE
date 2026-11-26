@@ -18,6 +18,7 @@ import {Matchmaking,matchPresets} from './matchmaking.js';
 import {createTrafficGuard,concurrencyGuard} from './traffic-guard.js';
 import proxyaddr from 'proxy-addr';
 import { adminRouter, siteSettings } from './admin.js';
+import { GuestSessions } from './guest-sessions.js';
 
 export async function createApplication(options = {}) {
   const db = options.db || await openDatabase(options.database);
@@ -31,6 +32,7 @@ export async function createApplication(options = {}) {
   // Reconnect resynchronizes from SQL. Avoid retaining every room packet in RAM.
   const io = new Server(server, { maxHttpBufferSize: 16384, perMessageDeflate:false,cors: { origin: (origin, done) => done(null, allowedOrigin(origin)), credentials: true }, allowRequest: (req, done) => done(null, allowedOrigin(req.headers.origin)&&traffic.allow(`handshake:${socketIp(req)}`,120,60000).ok) });
   const online = id => (io.sockets.adapter.rooms.get(`player:${id}`)?.size || 0) > 0;
+  const guestSessions = new GuestSessions(db,online,options.guestSessions);
   const inactivityMs = Number.isFinite(options.inactivityMs) ? options.inactivityMs : Number(process.env.ROOM_INACTIVITY_MS || 5 * 60 * 1000);
   const rooms = new RoomService(db, room => {
     for (const seat of seats(room)) if(online(seat.id))io.to(`player:${seat.id}`).emit('room', liveState(rooms.view(room, seat.id)));
@@ -54,7 +56,7 @@ export async function createApplication(options = {}) {
   const passwordGate=createActionGate({maximum:4,perPlayer:2});
   const passwordWork=(req,work)=>options.disableRateLimits?work():passwordGate(req.ip,work);
   const limits = new Map();
-  const cleanup = setInterval(() => { const now = Date.now(); for (const [key, value] of limits) if (value.until < now) limits.delete(key); db.query('DELETE FROM sessions WHERE expires_at < $1', [now]).catch(() => {}); db.query('DELETE FROM rank_queue WHERE expires_at < $1 AND room_id IS NULL',[now-60_000]).catch(()=>{}); }, 60000);
+  const cleanup = setInterval(() => { const now = Date.now(); for (const [key, value] of limits) if (value.until < now) limits.delete(key); db.query('DELETE FROM sessions WHERE expires_at < $1', [now]).catch(() => {}); db.query('DELETE FROM rank_queue WHERE expires_at < $1 AND room_id IS NULL',[now-60_000]).catch(()=>{});void guestSessions.prune().catch(error=>console.error('Guest cleanup:',error.message)); }, 60000);
   cleanup.unref();
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY === '1' || process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
@@ -143,6 +145,7 @@ export async function createApplication(options = {}) {
   app.post('/api/auth/logout', required, async (req, res) => {
     await db.query('DELETE FROM sessions WHERE token_hash=$1', [req.user.token_hash]);
     disconnectSession(req.user.token_hash);
+    if(!req.user.account_id)await guestSessions.remove(req.user.id);
     res.clearCookie('sc_session', cookieOptions(secureCookies));
     res.json({ ok: true });
   });
@@ -225,7 +228,7 @@ export async function createApplication(options = {}) {
     });
     socket.on('error',()=>{});
     const expiry = setTimeout(() => socket.disconnect(true), Math.min(+user.expires_at - Date.now(), 2147483647)); expiry.unref();
-    socket.on('net-ping',ack=>{if(typeof ack==='function')ack({serverNow:Date.now()});});
+    socket.on('net-ping',async ack=>{if(!user.account_id){try{if(!await sessionFor(db,socket.request)){socket.disconnect(true);return;}}catch{return;}}if(typeof ack==='function')ack({serverNow:Date.now()});});
     for(const [event,service,key]of[['room-action',rooms,'room'],['practice-action',practice,'game']])socket.on(event,async(request,ack)=>{
       if(typeof ack!=='function')return;
       try{
@@ -246,9 +249,10 @@ export async function createApplication(options = {}) {
         if (typeof ack === 'function') ack({ ok: true,room:view });
       } catch { if (typeof ack === 'function') ack({ error: 'Không có quyền vào phòng.' }); }
     });
-    socket.on('disconnect', () => { clearTimeout(expiry); if (socket.data.roomId) rooms.read(socket.data.roomId).then(room => rooms.onChange(room)).catch(() => {}); });
+    socket.on('disconnect', () => { clearTimeout(expiry); if(!user.account_id)guestSessions.disconnected(user.id);if (socket.data.roomId) rooms.read(socket.data.roomId).then(room => rooms.onChange(room)).catch(() => {}); });
   });
   await rooms.start();
   await practice.start();
-  return { app, server, db, rooms, practice, io, async close() { rooms.close(); await practice.close(); clearInterval(cleanup); await new Promise(resolve => io.close(resolve)); if (server.listening) await new Promise(resolve => server.close(resolve)); await db.close(); } };
+  void guestSessions.prune().catch(error=>console.error('Guest cleanup:',error.message));
+  return { app, server, db, rooms, practice, io, guestSessions, async close() { await guestSessions.close();rooms.close(); await practice.close(); clearInterval(cleanup); await new Promise(resolve => io.close(resolve)); if (server.listening) await new Promise(resolve => server.close(resolve)); await db.close(); } };
 }

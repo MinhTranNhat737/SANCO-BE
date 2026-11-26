@@ -34,9 +34,9 @@ export function adminRouter({ db, required, rooms, io, online }) {
   });
   router.get('/overview', async (_req, res) => {
     const { rows } = await db.query(`SELECT
-      (SELECT count(*)::int FROM players) AS players,
+      (SELECT count(*)::int FROM players WHERE account_id IS NOT NULL) AS players,
       (SELECT count(*)::int FROM players WHERE account_id IS NOT NULL) AS accounts,
-      (SELECT count(*)::int FROM players WHERE suspended_at IS NOT NULL) AS suspended,
+      (SELECT count(*)::int FROM players WHERE account_id IS NOT NULL AND suspended_at IS NOT NULL) AS suspended,
       (SELECT count(*)::int FROM rooms) AS rooms,
       (SELECT count(*)::int FROM rooms WHERE state->'game'->>'phase'='playing') AS playing,
       (SELECT count(*)::int FROM matches) AS matches,
@@ -44,7 +44,7 @@ export function adminRouter({ db, required, rooms, io, online }) {
       (SELECT count(*)::int FROM reports WHERE status IN ('open','in_progress')) AS reports`);
     const activity = await db.query(`SELECT to_char(to_timestamp(finished_at/1000.0) AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD') AS day, count(*)::int AS matches
       FROM matches WHERE finished_at >= $1 GROUP BY day ORDER BY day`, [Date.now() - 14 * 86400000]);
-    res.json({ stats: { ...rows[0], online: new Set([...io.sockets.sockets.values()].map(s => s.data.user.id)).size }, activity: activity.rows, system: { database: db.kind, uptime: Math.floor(process.uptime()), now: Date.now() } });
+    res.json({ stats: { ...rows[0], online: new Set([...io.sockets.sockets.values()].filter(s=>s.data.user.account_id).map(s => s.data.user.id)).size }, activity: activity.rows, system: { database: db.kind, uptime: Math.floor(process.uptime()), now: Date.now() } });
   });
   router.get('/settings', async (_req, res) => res.json({ settings: await siteSettings(db) }));
   router.patch('/settings', async (req, res) => {
@@ -68,7 +68,7 @@ export function adminRouter({ db, required, rooms, io, online }) {
     let from, projection, order;
     switch (req.params.collection) {
       case 'users':
-        from = 'players p LEFT JOIN accounts a ON a.id=p.account_id';
+        from = 'players p JOIN accounts a ON a.id=p.account_id';
         projection = `p.id,p.display_name,p.account_id IS NOT NULL AS account,a.email,a.username,p.is_admin,p.suspended_at,p.suspension_reason,p.created_at,
           (SELECT count(*)::int FROM sessions s WHERE s.player_id=p.id AND s.expires_at>${param(Date.now())}) AS sessions`;
         order = 'p.created_at DESC,p.id';
@@ -79,8 +79,8 @@ export function adminRouter({ db, required, rooms, io, online }) {
         else if (status) throw new GameError('Bộ lọc không hợp lệ.');
         break;
       case 'reports':
-        from = 'reports r JOIN players p ON p.id=r.player_id';
-        projection = 'r.id,r.player_id,p.display_name,r.room_id,r.body,r.status,r.admin_note,r.created_at,r.updated_at'; order = 'r.created_at DESC,r.id';
+        from = 'reports r LEFT JOIN players p ON p.id=r.player_id';
+        projection = "r.id,r.player_id,COALESCE(p.display_name,'Khách đã xóa') AS display_name,r.room_id,r.body,r.status,r.admin_note,r.created_at,r.updated_at"; order = 'r.created_at DESC,r.id';
         if (q) { const p = param(`%${q}%`); conditions.push(`(r.body ILIKE ${p} OR p.display_name ILIKE ${p} OR r.room_id ILIKE ${p})`); }
         if (status) { if (!['open','in_progress','resolved','dismissed'].includes(status)) throw new GameError('Bộ lọc không hợp lệ.'); conditions.push(`r.status=${param(status)}`); }
         break;

@@ -1,0 +1,18 @@
+ALTER TABLE matches ALTER COLUMN owner_id DROP NOT NULL;
+ALTER TABLE matches ALTER COLUMN guest_id DROP NOT NULL;
+ALTER TABLE matches DROP CONSTRAINT matches_owner_id_fkey;
+ALTER TABLE matches ADD CONSTRAINT matches_owner_id_fkey FOREIGN KEY(owner_id) REFERENCES players(id) ON DELETE SET NULL;
+ALTER TABLE matches DROP CONSTRAINT matches_guest_id_fkey;
+ALTER TABLE matches ADD CONSTRAINT matches_guest_id_fkey FOREIGN KEY(guest_id) REFERENCES players(id) ON DELETE SET NULL;
+ALTER TABLE reports ALTER COLUMN player_id DROP NOT NULL;
+ALTER TABLE reports DROP CONSTRAINT reports_player_id_fkey;
+ALTER TABLE reports ADD CONSTRAINT reports_player_id_fkey FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE SET NULL;
+ALTER TABLE admin_audit DROP CONSTRAINT admin_audit_actor_id_fkey;
+ALTER TABLE admin_audit ADD CONSTRAINT admin_audit_actor_id_fkey FOREIGN KEY(actor_id) REFERENCES players(id) ON DELETE SET NULL;
+ALTER TABLE action_receipts DROP CONSTRAINT action_receipts_player_id_fkey;
+ALTER TABLE action_receipts ADD CONSTRAINT action_receipts_player_id_fkey FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE;
+ALTER TABLE room_members DROP CONSTRAINT room_members_player_id_fkey;
+ALTER TABLE room_members ADD CONSTRAINT room_members_player_id_fkey FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE;
+ALTER TABLE match_members DROP CONSTRAINT match_members_player_id_fkey;
+ALTER TABLE match_members ADD CONSTRAINT match_members_player_id_fkey FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE;
+ALTER TABLE sessions ADD COLUMN last_seen_at BIGINT;

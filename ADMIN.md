@@ -2,6 +2,10 @@
 
 Dashboard nằm tại `/admin` trên frontend. API nằm tại `/api/admin/*` trên backend, dùng cùng cookie đăng nhập của website. Tài khoản thường và khách không được đọc hoặc sửa dữ liệu quản trị.
 
+Danh sách Người dùng và các thống kê người dùng/trực tuyến chỉ tính người có tài khoản trong `accounts`; phiên guest không xuất hiện như tài khoản đã đăng ký. Khách vẫn chơi như trước, với cookie phiên không có thời hạn lưu lâu dài. Khi kết nối cuối ngắt, backend chờ 90 giây để cho phép tải lại/kết nối lại rồi dọn guest không còn hoạt động. Phiên chỉ dùng HTTP hết hạn sau 15 phút không hoạt động; bộ dọn chạy mỗi phút và khi khởi động. Người đang trực tuyến hoặc còn được phòng/ván luyện tập tham chiếu được giữ đến khi dịch vụ game xử lý/dọn bàn bình thường. Đăng ký từ guest giữ nguyên danh tính và chuyển sang tài khoản lâu dài.
+
+Guest cũ không hoạt động sẽ được xóa khỏi `players` cùng phiên và dữ liệu phụ thuộc. Lịch sử ván, góp ý và nhật ký đã lưu vẫn được giữ, với liên kết đến guest đã xóa chuyển thành `NULL`; snapshot ván vẫn đủ để người có tài khoản xem lại.
+
 Admin có thể đăng nhập bằng **tên tài khoản và mật khẩu**, không cần email. Tên tài khoản được lưu riêng ở `accounts.username`, không phải tên hiển thị; tên gồm 3–30 ký tự, bắt đầu bằng chữ, dùng chữ thường, số, dấu chấm/gạch dưới/gạch ngang và không trùng nhau. Tài khoản có username có thể không có email. Đăng nhập email/Google/Facebook hiện có tiếp tục hoạt động. Username chỉ được cấp qua quy trình trên máy chủ, không được tự cấp quyền admin từ form đăng ký công khai.
 
 ## Frontend trên Heroku
