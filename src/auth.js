@@ -10,12 +10,23 @@ export const validName = value => {
   if (name.length < 2 || name.length > 30 || /[\u0000-\u001f\u007f<>]/.test(name)) throw new GameError('Tên hiển thị cần từ 2 đến 30 ký tự, không chứa ký tự đặc biệt.');
   return name;
 };
+function validatedPassword(password, minimumPasswordLength) {
+  if (typeof password !== 'string' || password.length < minimumPasswordLength || password.length > 128) throw new GameError(`Mật khẩu cần từ ${minimumPasswordLength} đến 128 ký tự.`);
+  return password;
+}
 export function credentials(body, minimumPasswordLength = 10) {
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
-  const password = body.password;
+  const password = validatedPassword(body.password, minimumPasswordLength);
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GameError('Địa chỉ email không hợp lệ.');
-  if (typeof password !== 'string' || password.length < minimumPasswordLength || password.length > 128) throw new GameError(`Mật khẩu cần từ ${minimumPasswordLength} đến 128 ký tự.`);
   return { email, password };
+}
+export function loginCredentials(body) {
+  const value = body?.login ?? body?.username ?? body?.email;
+  const identifier = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const password = validatedPassword(body?.password, 1);
+  if (identifier.includes('@')) credentials({email:identifier,password},1);
+  else if (!/^[a-z][a-z0-9_.-]{2,29}$/.test(identifier)) throw new GameError('Tên tài khoản cần 3–30 ký tự, bắt đầu bằng chữ, chỉ gồm chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.');
+  return { identifier, password };
 }
 export async function hashPassword(password) {
   const salt = secret();
@@ -35,7 +46,7 @@ export function sessionToken(request) {
 export async function sessionFor(db, request) {
   const token = sessionToken(request);
   if (!/^[\w-]{43}$/.test(token)) return null;
-  const { rows } = await db.query(`SELECT p.id, p.display_name, p.account_id, a.email, p.is_admin, p.suspended_at, s.token_hash, s.expires_at
+  const { rows } = await db.query(`SELECT p.id, p.display_name, p.account_id, a.email, a.username, p.is_admin, p.suspended_at, s.token_hash, s.expires_at
     FROM sessions s JOIN players p ON p.id = s.player_id LEFT JOIN accounts a ON a.id = p.account_id
     WHERE s.token_hash = $1 AND s.expires_at > $2 AND p.suspended_at IS NULL`, [digest(token), Date.now()]);
   return rows[0] || null;
@@ -57,4 +68,4 @@ export async function createGuest(db) {
   await db.query('INSERT INTO players(id, display_name, created_at) VALUES($1,$2,$3)', [id, 'Bạn cờ', Date.now()]);
   return { id, display_name: 'Bạn cờ', account_id: null, email: null };
 }
-export const userView = user => ({ id: user.id, name: user.display_name, account: !!user.account_id, email: user.email || null, admin: !!user.is_admin });
+export const userView = user => ({ id: user.id, name: user.display_name, account: !!user.account_id, email: user.email || null, username: user.username || null, admin: !!user.is_admin });

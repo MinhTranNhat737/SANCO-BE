@@ -108,6 +108,27 @@ test('Provisioned passwords can log in without applying the new-account password
   assert.equal((await guest.call('/auth/login',{email:target.email,password:'x'.repeat(129)})).status,400);
   assert.equal((await guest.call('/auth/login',{email:target.email,password:'Incorrect'})).status,401);
 });
+
+test('Username-only accounts authenticate, preserve roles and remain unique without an email address', async () => {
+  const accountId=randomUUID(),playerId=randomUUID(),username='testadmin';
+  await app.db.query('INSERT INTO accounts(id,username,password_hash,created_at) VALUES($1,$2,$3,$4)',[accountId,username,await hashPassword(password),Date.now()]);
+  await app.db.query('INSERT INTO players(id,account_id,display_name,is_admin,created_at) VALUES($1,$2,$3,TRUE,$4)',[playerId,accountId,'Test Admin',Date.now()]);
+  for(const body of [{login:' TESTADMIN ',password},{username,password},{email:username,password}]) {
+    const response=await fetch(origin+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data=await response.json();assert.equal(response.status,200);assert.equal(data.user.username,username);assert.equal(data.user.email,null);assert.equal(data.user.admin,true);
+    const cookie=response.headers.get('set-cookie').split(';')[0];
+    const overview=await fetch(origin+'/api/admin/overview',{headers:{Cookie:cookie}});assert.equal(overview.status,200);
+    const me=await fetch(origin+'/api/me',{headers:{Cookie:cookie}});assert.equal((await me.json()).user.username,username);
+  }
+  assert.equal((await member.call('/auth/login',{login:username,password:'wrong-password'})).status,401);
+  assert.equal((await member.call('/auth/login',{login:'missing-user',password})).status,401);
+  assert.equal((await member.call('/auth/login',{login:"user' OR 1=1 --",password})).status,400);
+  const found=await admin.call('/admin/users?q='+username);assert.ok(found.body.items.some(p=>p.id===playerId&&p.username===username));
+  await assert.rejects(app.db.query('INSERT INTO accounts(id,username,created_at) VALUES($1,$2,$3)',[randomUUID(),username,Date.now()]),{code:'23505'});
+  await assert.rejects(app.db.query('INSERT INTO accounts(id,username,created_at) VALUES($1,$2,$3)',[randomUUID(),'BAD NAME',Date.now()]),{code:'23514'});
+  await app.db.query('UPDATE players SET suspended_at=$1 WHERE id=$2',[Date.now(),playerId]);
+  assert.equal((await member.call('/auth/login',{login:username,password})).status,403);
+});
 test('Reports support review states, notes, search and transactional audit records', async () => {
   await member.call('/reports',{body:'Góp ý kiểm thử quản trị'});
   const found = await admin.call('/admin/reports?status=open&q='+encodeURIComponent('kiểm thử'));

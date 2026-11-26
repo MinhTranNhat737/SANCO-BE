@@ -2,6 +2,8 @@
 
 Dashboard nằm tại `/admin` trên frontend. API nằm tại `/api/admin/*` trên backend, dùng cùng cookie đăng nhập của website. Tài khoản thường và khách không được đọc hoặc sửa dữ liệu quản trị.
 
+Admin có thể đăng nhập bằng **tên tài khoản và mật khẩu**, không cần email. Tên tài khoản được lưu riêng ở `accounts.username`, không phải tên hiển thị; tên gồm 3–30 ký tự, bắt đầu bằng chữ, dùng chữ thường, số, dấu chấm/gạch dưới/gạch ngang và không trùng nhau. Tài khoản có username có thể không có email. Đăng nhập email/Google/Facebook hiện có tiếp tục hoạt động. Username chỉ được cấp qua quy trình trên máy chủ, không được tự cấp quyền admin từ form đăng ký công khai.
+
 ## Frontend trên Heroku
 
 Khi cần phục vụ frontend ngay trên backend, đặt `BUILD_FRONTEND=true`, `SERVE_FRONTEND=true`, `FRONTEND_STATIC_DIR=public-frontend`, `FRONTEND_SITE_URL` là HTTPS origin của host này và thêm origin đó vào `FRONTEND_ORIGIN` (giữ các origin cũ). Heroku postbuild tải source SANCO-FE ở commit cố định trong `frontend-source.json`, chạy `npm ci` và build rồi chỉ giữ output runtime. Source tạm và dependencies frontend được dọn sau build; không đưa build output vào Git.

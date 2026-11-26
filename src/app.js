@@ -11,7 +11,7 @@ import { GameError } from './game.js';
 import {seats} from './room-game.js';
 import {liveState} from './wire.js';
 import {createActionGate} from './action-gate.js';
-import { credentials, createGuest, hashPassword, verifyPassword, sessionFor, issueSession, cookieOptions, userView, validName } from './auth.js';
+import { credentials, loginCredentials, createGuest, hashPassword, verifyPassword, sessionFor, issueSession, cookieOptions, userView, validName } from './auth.js';
 import { createOAuthService } from './oauth.js';
 import {playerRatings,leaderboard,myLeaderboardPosition,botRoster,RANKS,INITIAL_ELO,PLACEMENT_GAMES} from './ratings.js';
 import {Matchmaking,matchPresets} from './matchmaking.js';
@@ -127,11 +127,11 @@ export async function createApplication(options = {}) {
     res.status(201).json({ user: { id: req.user.id, name, email, account: true } });
   });
   app.post('/api/auth/login', rate('login', 20, 600000), async (req, res) => {
-    const { email, password } = credentials(req.body, 1);
+    const { identifier, password } = loginCredentials(req.body);
     const previous = await sessionFor(db, req);
-    const { rows } = await db.query('SELECT a.password_hash, a.email, p.id, p.display_name, p.account_id, p.is_admin FROM accounts a JOIN players p ON p.account_id=a.id WHERE a.email=$1', [email]);
+    const { rows } = await db.query('SELECT a.password_hash, a.email, a.username, p.id, p.display_name, p.account_id, p.is_admin FROM accounts a JOIN players p ON p.account_id=a.id WHERE a.email=$1 OR a.username=$1', [identifier]);
     const valid = await passwordWork(req,()=>verifyPassword(password, rows[0]?.password_hash || dummyHash));
-    if (!rows[0] || !valid) throw new GameError('Email hoặc mật khẩu chưa đúng.', 401);
+    if (!rows[0] || !valid) throw new GameError('Tài khoản hoặc mật khẩu chưa đúng.', 401);
     if (previous && previous.id !== rows[0].id) {
       const active = await db.query("SELECT id FROM rooms WHERE (owner_id=$1 OR guest_id=$1) AND state->'game'->>'phase'='playing' LIMIT 1", [previous.id]);
       if (active.rows.length) throw new GameError('Hãy hoàn tất ván đang chơi trước khi đổi tài khoản.', 409);

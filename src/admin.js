@@ -69,10 +69,10 @@ export function adminRouter({ db, required, rooms, io, online }) {
     switch (req.params.collection) {
       case 'users':
         from = 'players p LEFT JOIN accounts a ON a.id=p.account_id';
-        projection = `p.id,p.display_name,p.account_id IS NOT NULL AS account,a.email,p.is_admin,p.suspended_at,p.suspension_reason,p.created_at,
+        projection = `p.id,p.display_name,p.account_id IS NOT NULL AS account,a.email,a.username,p.is_admin,p.suspended_at,p.suspension_reason,p.created_at,
           (SELECT count(*)::int FROM sessions s WHERE s.player_id=p.id AND s.expires_at>${param(Date.now())}) AS sessions`;
         order = 'p.created_at DESC,p.id';
-        if (q) { const p = param(`%${q}%`); conditions.push(`(p.display_name ILIKE ${p} OR a.email ILIKE ${p} OR p.id::text ILIKE ${p})`); }
+        if (q) { const p = param(`%${q}%`); conditions.push(`(p.display_name ILIKE ${p} OR a.email ILIKE ${p} OR a.username ILIKE ${p} OR p.id::text ILIKE ${p})`); }
         if (status === 'admin') conditions.push('p.is_admin=TRUE');
         else if (status === 'suspended') conditions.push('p.suspended_at IS NOT NULL');
         else if (status === 'account') conditions.push('p.account_id IS NOT NULL');
