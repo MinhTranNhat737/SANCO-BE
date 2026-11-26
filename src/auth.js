@@ -10,11 +10,11 @@ export const validName = value => {
   if (name.length < 2 || name.length > 30 || /[\u0000-\u001f\u007f<>]/.test(name)) throw new GameError('Tên hiển thị cần từ 2 đến 30 ký tự, không chứa ký tự đặc biệt.');
   return name;
 };
-export function credentials(body) {
+export function credentials(body, minimumPasswordLength = 10) {
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   const password = body.password;
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GameError('Địa chỉ email không hợp lệ.');
-  if (typeof password !== 'string' || password.length < 10 || password.length > 128) throw new GameError('Mật khẩu cần từ 10 đến 128 ký tự.');
+  if (typeof password !== 'string' || password.length < minimumPasswordLength || password.length > 128) throw new GameError(`Mật khẩu cần từ ${minimumPasswordLength} đến 128 ký tự.`);
   return { email, password };
 }
 export async function hashPassword(password) {

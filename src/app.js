@@ -127,7 +127,7 @@ export async function createApplication(options = {}) {
     res.status(201).json({ user: { id: req.user.id, name, email, account: true } });
   });
   app.post('/api/auth/login', rate('login', 20, 600000), async (req, res) => {
-    const { email, password } = credentials(req.body);
+    const { email, password } = credentials(req.body, 1);
     const previous = await sessionFor(db, req);
     const { rows } = await db.query('SELECT a.password_hash, a.email, p.id, p.display_name, p.account_id, p.is_admin FROM accounts a JOIN players p ON p.account_id=a.id WHERE a.email=$1', [email]);
     const valid = await passwordWork(req,()=>verifyPassword(password, rows[0]?.password_hash || dummyHash));

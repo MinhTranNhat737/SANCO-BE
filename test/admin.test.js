@@ -96,6 +96,18 @@ test('Session revocation preserves the account and requires a fresh login', asyn
   assert.equal((await target.call('/rooms')).status,401);
   assert.equal((await target.call('/auth/login',{email:target.email,password})).status,200);
 });
+
+test('Provisioned passwords can log in without applying the new-account password length policy', async () => {
+  const target = await client({role:true}), provisionedPassword = 'Short123!';
+  await app.db.query('UPDATE accounts SET password_hash=$1 WHERE email=$2',[await hashPassword(provisionedPassword),target.email]);
+  const login = await target.call('/auth/login',{email:target.email,password:provisionedPassword});
+  assert.equal(login.status,200);assert.equal(login.body.user.admin,true);
+  const guest = await client({guest:true});
+  assert.equal((await guest.call('/auth/register',{email:`${randomUUID()}@example.test`,name:'Test name',password:provisionedPassword})).status,400);
+  assert.equal((await guest.call('/auth/login',{email:target.email,password:''})).status,400);
+  assert.equal((await guest.call('/auth/login',{email:target.email,password:'x'.repeat(129)})).status,400);
+  assert.equal((await guest.call('/auth/login',{email:target.email,password:'Incorrect'})).status,401);
+});
 test('Reports support review states, notes, search and transactional audit records', async () => {
   await member.call('/reports',{body:'Góp ý kiểm thử quản trị'});
   const found = await admin.call('/admin/reports?status=open&q='+encodeURIComponent('kiểm thử'));
