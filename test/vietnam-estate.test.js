@@ -55,7 +55,7 @@ test('Balanced building reaches hotels, stocks reconcile and mortgaged land earn
 });
 test('Third consecutive double sends to jail; jail can be exited with a card or bail', () => {
   const g = create(), p = g.party; for (let i = 0; i < 2; i++) { vietnamMove(g, { action: 'roll', to: -1 }, () => 1); p.stage = 'end'; move(g, 'end'); }
-  vietnamMove(g, { action: 'roll', to: -1 }, () => 1); assert.equal(p.players[0].position, 12); assert.equal(p.players[0].jail, 3); p.stage = 'roll'; p.players[0].jailCards = 1; move(g, 'jail_card'); assert.equal(p.players[0].jail, 0); assert.equal(p.players[0].jailCards, 0);
+  vietnamMove(g, { action: 'roll', to: -1 }, () => 1); assert.equal(p.players[0].position, 16); assert.equal(p.players[0].jail, 3); p.stage = 'roll'; p.players[0].jailCards = 1; move(g, 'jail_card'); assert.equal(p.players[0].jail, 0); assert.equal(p.players[0].jailCards, 0);
 });
 test('Resignation cancels pending contracts without giving money and redirects insolvent loans correctly', () => {
   const g = create(), p = g.party; move(g, 'loan', -1, { partner: 'G', principal: 500, interest: 5, term: 2 }); eliminateVietnam(g, 'R'); assert.equal(p.players[1].cash, 3000); assert.equal(g.phase, 'finished'); assert.equal(g.result.winner, 'G');
