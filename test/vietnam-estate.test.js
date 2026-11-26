@@ -42,8 +42,8 @@ test('Due loans enter durable debt, can be covered by mortgage and are charged o
 });
 test('Auctions rotate bidders, enforce budget/minimum increments and award the highest bid once', () => {
   const g = create(), p = g.party; p.players[0].position = 1; p.stage = 'buy'; move(g, 'auction'); assert.equal(g.turn, 'G');
-  assert.throws(() => move(g, 'bid', -1, { amount: 9 })); assert.throws(() => move(g, 'bid', -1, { amount: 100000 })); move(g, 'bid', -1, { amount: 100 }); assert.equal(g.turn, 'R'); move(g, 'pass_bid');
-  assert.equal(p.property[1], 'G'); assert.equal(p.players[1].cash, 2900); assert.equal(g.turn, 'R'); assert.equal(p.stage, 'end'); assert.equal(p.auction, null);
+  assert.throws(() => move(g, 'bid', -1, { amount: 9 })); assert.throws(() => move(g, 'bid', -1, { amount: 100000 })); move(g, 'bid', -1, { amount: VN_CELLS[1].price + 100 }); assert.equal(g.turn, 'R'); move(g, 'pass_bid');
+  assert.equal(p.property[1], 'G'); assert.equal(p.players[1].cash, 3000 - VN_CELLS[1].price - 100); assert.equal(g.turn, 'R'); assert.equal(p.stage, 'end'); assert.equal(p.auction, null);
 });
 test('Balanced building reaches hotels, stocks reconcile and mortgaged land earns no rent', () => {
   const g = create(), p = g.party, group = VN_CELLS.filter(c => c.type === 'property' && c.group === 0); for (const c of group) p.property[c.index] = 'R'; p.players[0].cash = 10000;

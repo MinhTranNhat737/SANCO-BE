@@ -62,12 +62,12 @@ test('Skipping buying opens an auction; an empty auction preserves an earned dou
 
 test('Auction timeouts and winner elimination cannot strand bidding or charge twice',()=>{
   const g=make(4),p=g.party;p.property[1]=null;p.players[0].position=1;p.stage='buy';move(g,'auction');
-  move(g,'bid',-1,{amount:100});assert.equal(p.auction.leader,'G');eliminateVietnam(g,'G');
+  move(g,'bid',-1,{amount:VN_CELLS[1].price+100});assert.equal(p.auction.leader,'G');eliminateVietnam(g,'G');
   for(let i=0;i<10&&p.stage==='auction';i++)timeoutVietnamTurn(g);
   assert.equal(p.auction,null);assert.ok(p.players.find(player=>player.side===g.turn).active);assert.equal(p.property[1],null);
   const before=cash(p);p.players.find(player=>player.side===g.turn).position=1;p.stage='buy';move(g,'auction');const bidder=g.turn;
-  move(g,'bid',-1,{amount:100});while(p.stage==='auction')move(g,'pass_bid');
-  assert.equal(p.property[1],bidder);assert.equal(cash(p),before-100);assert.throws(()=>move(g,'bid',-1,{amount:110}));assert.equal(cash(p),before-100);
+  move(g,'bid',-1,{amount:VN_CELLS[1].price+100});while(p.stage==='auction')move(g,'pass_bid');
+  assert.equal(p.property[1],bidder);assert.equal(cash(p),before-VN_CELLS[1].price-100);assert.throws(()=>move(g,'bid',-1,{amount:110}));assert.equal(cash(p),before-VN_CELLS[1].price-100);
 });
 
 test('Counteroffers exchange direction, settle atomically and restore original turn and phase',()=>{
