@@ -147,10 +147,12 @@ test('Settings enforce registration/room gates, publish escaped text data, and r
 
 test('The production frontend server serves all admin entry URLs with noindex and protected APIs', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(),'sanco-admin-static-'));
+  const previousServe = process.env.SERVE_FRONTEND, previousDirectory = process.env.FRONTEND_STATIC_DIR;
   let instance;
   try {
     await writeFile(path.join(directory,'admin.html'),'<title>Admin dashboard</title>');
-    instance = await createApplication({database:{memory:true},staticDirectory:directory,disableRateLimits:true});
+    process.env.SERVE_FRONTEND='true'; process.env.FRONTEND_STATIC_DIR=directory;
+    instance = await createApplication({database:{memory:true},disableRateLimits:true});
     await new Promise(resolve=>instance.server.listen(0,'127.0.0.1',resolve));
     const base = `http://127.0.0.1:${instance.server.address().port}`;
     for (const entry of ['/admin','/admin/','/admin.html']) {
@@ -158,6 +160,8 @@ test('The production frontend server serves all admin entry URLs with noindex an
     }
     assert.equal((await fetch(base+'/api/admin/overview')).status,401);
   } finally {
+    if(previousServe===undefined)delete process.env.SERVE_FRONTEND;else process.env.SERVE_FRONTEND=previousServe;
+    if(previousDirectory===undefined)delete process.env.FRONTEND_STATIC_DIR;else process.env.FRONTEND_STATIC_DIR=previousDirectory;
     if(instance)await instance.close();
     if(path.resolve(directory).startsWith(path.join(os.tmpdir(),'sanco-admin-static-')))await rm(directory,{recursive:true,force:true});
   }

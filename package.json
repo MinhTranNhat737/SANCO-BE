@@ -18,7 +18,7 @@
     "db:migrate": "node src/migrate.js",
     "oauth:check": "node scripts/check-oauth.mjs",
     "engines:install": "node scripts/install-engines.mjs",
-    "heroku-postbuild": "node scripts/install-engines.mjs",
+    "heroku-postbuild": "node scripts/install-engines.mjs && node scripts/build-frontend.mjs",
     "lint": "eslint src scripts test"
   },
   "dependencies": {

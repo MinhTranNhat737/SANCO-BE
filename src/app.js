@@ -182,7 +182,7 @@ export async function createApplication(options = {}) {
     res.status(201).json({ ok: true });
   });
   if(options.staticDirectory||process.env.SERVE_FRONTEND==='true'){
-    const directory=options.staticDirectory||fileURLToPath(new URL('../../fe/dist/',import.meta.url));
+    const directory=options.staticDirectory||(process.env.FRONTEND_STATIC_DIR ? path.resolve(process.env.FRONTEND_STATIC_DIR) : fileURLToPath(new URL('../../fe/dist/',import.meta.url)));
     const nonPublicQueries=['room','replay','practice','game','auth','auth_error'];
     app.get('/',(req,res,next)=>{
       if(nonPublicQueries.some(key=>Object.hasOwn(req.query,key)))res.set('X-Robots-Tag','noindex');

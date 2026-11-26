@@ -2,6 +2,12 @@
 
 Dashboard nằm tại `/admin` trên frontend. API nằm tại `/api/admin/*` trên backend, dùng cùng cookie đăng nhập của website. Tài khoản thường và khách không được đọc hoặc sửa dữ liệu quản trị.
 
+## Frontend trên Heroku
+
+Khi cần phục vụ frontend ngay trên backend, đặt `BUILD_FRONTEND=true`, `SERVE_FRONTEND=true`, `FRONTEND_STATIC_DIR=public-frontend`, `FRONTEND_SITE_URL` là HTTPS origin của host này và thêm origin đó vào `FRONTEND_ORIGIN` (giữ các origin cũ). Heroku postbuild tải source SANCO-FE ở commit cố định trong `frontend-source.json`, chạy `npm ci` và build rồi chỉ giữ output runtime. Source tạm và dependencies frontend được dọn sau build; không đưa build output vào Git.
+
+Để cập nhật frontend trên host backend, đổi commit trong `frontend-source.json` sang commit đã push của SANCO-FE rồi deploy backend. Giao diện `/admin` và API dùng cùng origin; các bản frontend cũ vẫn dùng API như trước. Việc này không cập nhật tên miền đang trỏ sang Vercel hay xử lý trạng thái tài khoản Vercel bị chặn.
+
 ## Cấp admin đầu tiên
 
 1. Triển khai cả backend và frontend đã cập nhật. Backend tự chạy migration `012_admin.sql` khi khởi động.
