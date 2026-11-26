@@ -3,6 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { GameError } from './game.js';
 import { sessionFor, validName } from './auth.js';
 import { seats } from './room-game.js';
+import {
+  DEFAULT_UPDATE_CAMPAIGN_ID,
+  buildUpdateEmail,
+  createGmailTransporter,
+  gmailConfigStatus,
+  listAlreadySentEmails,
+  listPlayerEmailRecipients,
+  normalizeEmail,
+  sendUpdateCampaign,
+} from './update-mail-service.js';
 
 const uuid = value => {
   if (typeof value !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)) throw new GameError('Mã không hợp lệ.');
@@ -57,6 +67,47 @@ export function adminRouter({ db, required, rooms, io, online }) {
       await audit(client, actor.id, 'settings.update', 'site', { before, after: { announcement, registration_enabled: registration, rooms_enabled: newRooms } });
     });
     res.json({ settings: await siteSettings(db) });
+  });
+  router.get('/mail/update/preview', async (req, res) => {
+    const campaignId = text(req.query.campaignId ?? DEFAULT_UPDATE_CAMPAIGN_ID, 80, 'Mã chiến dịch') || DEFAULT_UPDATE_CAMPAIGN_ID;
+    const recipients = await listPlayerEmailRecipients(db);
+    const alreadySent = await listAlreadySentEmails(db, campaignId);
+    const preview = buildUpdateEmail({ playerName: 'Bạn cờ' });
+    res.json({
+      campaignId,
+      gmail: gmailConfigStatus(),
+      totalRecipients: recipients.length,
+      alreadySent: alreadySent.size,
+      pending: recipients.filter(r => !alreadySent.has(r.email)).length,
+      subject: preview.subject,
+      html: preview.html,
+    });
+  });
+  router.post('/mail/update/send', async (req, res) => {
+    const campaignId = text(req.body?.campaignId ?? DEFAULT_UPDATE_CAMPAIGN_ID, 80, 'Mã chiến dịch') || DEFAULT_UPDATE_CAMPAIGN_ID;
+    const dryRun = req.body?.dryRun !== false;
+    const testTo = req.body?.testTo ? normalizeEmail(req.body.testTo) : null;
+    if (req.body?.testTo && !testTo) throw new GameError('Địa chỉ email gửi thử không hợp lệ.');
+    const cfg = gmailConfigStatus();
+    const transporter = dryRun ? null : createGmailTransporter();
+    if (transporter) await transporter.verify();
+    const result = await sendUpdateCampaign({
+      db: testTo ? null : db,
+      transporter,
+      campaignId,
+      recipients: testTo ? [{ email: testTo, displayName: 'Bạn cờ' }] : undefined,
+      dryRun,
+      delayMs: testTo ? 0 : 1200,
+      from: cfg.from,
+    });
+    await audit(db, req.user.id, dryRun ? 'mail.update.preview' : 'mail.update.send', campaignId, {
+      testTo: Boolean(testTo),
+      total: result.total,
+      sent: result.sent,
+      skipped: result.skipped,
+      failed: result.failed,
+    });
+    res.json({ result });
   });
   router.get('/:collection', async (req, res) => {
     const page = Number(req.query.page ?? 1), size = 20;

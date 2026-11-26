@@ -15,6 +15,7 @@
     "bench:rooms": "node scripts/bench-rooms.mjs",
     "test:online": "node scripts/test-online.mjs",
     "admin:grant": "node scripts/grant-admin.mjs",
+    "mail:update": "node scripts/send-update-email.mjs",
     "db:migrate": "node src/migrate.js",
     "oauth:check": "node scripts/check-oauth.mjs",
     "engines:install": "node scripts/install-engines.mjs",
@@ -26,6 +27,7 @@
     "chess.js": "1.4.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "nodemailer": "^10.6.1",
     "pg": "^8.16.3",
     "proxy-addr": "^2.0.8",
     "socket.io": "^4.8.1"
