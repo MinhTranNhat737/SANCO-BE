@@ -5,22 +5,119 @@
   "startingCash": 3000,
   "salary": 500,
   "unit": "triệu",
-  "groupColors": ["#ad8b72","#8caa86","#78a9ab","#a49ac2","#bdad70","#b78f9f","#7f9fbe","#c09169","#8ba67a","#a8a876","#bb7870"],
-  "provinces": ["Lai Châu","Điện Biên","Sơn La","Cao Bằng","Lạng Sơn","Tuyên Quang","Lào Cai","Thái Nguyên","Phú Thọ","Bắc Ninh","Hưng Yên","Ninh Bình","Quảng Ninh","Thanh Hóa","Nghệ An","Hà Tĩnh","Quảng Trị","Huế","Đà Nẵng","Quảng Ngãi","Gia Lai","Đắk Lắk","Khánh Hòa","Lâm Đồng","Đồng Nai","Tây Ninh","Vĩnh Long","Đồng Tháp","An Giang","Cà Mau","Cần Thơ","Hải Phòng","Hà Nội","TP. Hồ Chí Minh"],
+  "groupColors": [
+    "#ad8b72",
+    "#8caa86",
+    "#78a9ab",
+    "#a49ac2",
+    "#bdad70",
+    "#b78f9f",
+    "#7f9fbe",
+    "#c09169",
+    "#8ba67a",
+    "#a8a876",
+    "#bb7870"
+  ],
+  "provinces": [
+    "Lai Châu",
+    "Điện Biên",
+    "Sơn La",
+    "Cao Bằng",
+    "Lạng Sơn",
+    "Tuyên Quang",
+    "Lào Cai",
+    "Thái Nguyên",
+    "Phú Thọ",
+    "Bắc Ninh",
+    "Hưng Yên",
+    "Ninh Bình",
+    "Quảng Ninh",
+    "Thanh Hóa",
+    "Nghệ An",
+    "Hà Tĩnh",
+    "Quảng Trị",
+    "Huế",
+    "Đà Nẵng",
+    "Quảng Ngãi",
+    "Gia Lai",
+    "Đắk Lắk",
+    "Khánh Hòa",
+    "Lâm Đồng",
+    "Đồng Nai",
+    "Tây Ninh",
+    "Vĩnh Long",
+    "Đồng Tháp",
+    "An Giang",
+    "Cà Mau",
+    "Cần Thơ",
+    "Hải Phòng",
+    "Hà Nội",
+    "TP. Hồ Chí Minh"
+  ],
   "specials": {
-    "0": {"name":"Xuất phát","type":"start"},
-    "4": {"name":"Quỹ cộng đồng","type":"community"},
-    "8": {"name":"Ga Lào Cai","type":"station","price":350},
-    "12": {"name":"Thuế thu nhập","type":"tax","amount":200},
-    "16": {"name":"Thăm tù","type":"jail"},
-    "20": {"name":"Ga Hà Nội","type":"station","price":350},
-    "24": {"name":"Nghỉ chân","type":"rest"},
-    "28": {"name":"Cơ hội","type":"chance"},
-    "31": {"name":"Điện quốc gia","type":"utility","price":300},
-    "34": {"name":"Ga Đà Nẵng","type":"station","price":350},
-    "37": {"name":"Nước sạch","type":"utility","price":300},
-    "40": {"name":"Vào tù","type":"gotojail"},
-    "43": {"name":"Thuế tài sản","type":"tax","amount":150},
-    "45": {"name":"Ga Sài Gòn","type":"station","price":350}
+    "0": {
+      "name": "Xuất phát",
+      "type": "start"
+    },
+    "4": {
+      "name": "Khí vận",
+      "type": "community"
+    },
+    "8": {
+      "name": "Ga Lào Cai",
+      "type": "station",
+      "price": 350
+    },
+    "12": {
+      "name": "Thuế thu nhập",
+      "type": "tax",
+      "amount": 200
+    },
+    "16": {
+      "name": "Thăm tù",
+      "type": "jail"
+    },
+    "20": {
+      "name": "Ga Hà Nội",
+      "type": "station",
+      "price": 350
+    },
+    "24": {
+      "name": "Nghỉ chân",
+      "type": "rest"
+    },
+    "28": {
+      "name": "Cơ hội",
+      "type": "chance"
+    },
+    "31": {
+      "name": "Điện quốc gia",
+      "type": "utility",
+      "price": 300
+    },
+    "34": {
+      "name": "Ga Đà Nẵng",
+      "type": "station",
+      "price": 350
+    },
+    "37": {
+      "name": "Nước sạch",
+      "type": "utility",
+      "price": 300
+    },
+    "40": {
+      "name": "Vào tù",
+      "type": "gotojail"
+    },
+    "43": {
+      "name": "Thuế tài sản",
+      "type": "tax",
+      "amount": 150
+    },
+    "45": {
+      "name": "Ga Sài Gòn",
+      "type": "station",
+      "price": 350
+    }
   }
 }

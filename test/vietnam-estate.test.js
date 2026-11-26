@@ -45,10 +45,15 @@ test('Auctions rotate bidders, enforce budget/minimum increments and award the h
   assert.throws(() => move(g, 'bid', -1, { amount: 9 })); assert.throws(() => move(g, 'bid', -1, { amount: 100000 })); move(g, 'bid', -1, { amount: VN_CELLS[1].price + 100 }); assert.equal(g.turn, 'R'); move(g, 'pass_bid');
   assert.equal(p.property[1], 'G'); assert.equal(p.players[1].cash, 3000 - VN_CELLS[1].price - 100); assert.equal(g.turn, 'R'); assert.equal(p.stage, 'end'); assert.equal(p.auction, null);
 });
-test('Balanced building reaches hotels, stocks reconcile and mortgaged land earns no rent', () => {
-  const g = create(), p = g.party, group = VN_CELLS.filter(c => c.type === 'property' && c.group === 0); for (const c of group) p.property[c.index] = 'R'; p.players[0].cash = 10000;
-  const lots = group.map(c => c.index); move(g, 'build', lots[0]); assert.equal(vietnamLegal(g).some(m => m.action === 'build' && m.to === lots[0]), false);
-  for (let level = 0; level < 5; level++)for (const i of lots) if (p.houses[i] === level) move(g, 'build', i);
+test('Full-group building upgrades entire color group to hotels, stocks reconcile and mortgaged land earns no rent', () => {
+  const g = create(), p = g.party, group = VN_CELLS.filter(c => c.type === 'property' && c.group === 0);
+  const lots = group.map(c => c.index); p.players[0].cash = 10000;
+  p.property[lots[0]] = 'R'; p.property[lots[1]] = 'R';
+  assert.equal(vietnamLegal(g).some(m => m.action === 'build'), false, 'Cannot build before owning the full color group');
+  p.property[lots[2]] = 'R';
+  move(g, 'build', lots[0]);
+  assert.ok(lots.every(i => p.houses[i] === 1), 'One build upgrades all lots in the color group to level 1');
+  while (p.houses[lots[0]] < 5) move(g, 'build', lots[0]);
   assert.ok(lots.every(i => p.houses[i] === 5)); assert.equal(p.bank.hotels, 16 - group.length); assert.equal(p.bank.houses, 64);
   move(g, 'clear_group', lots[0]); assert.equal(p.bank.hotels, 16); assert.ok(lots.every(i => p.houses[i] === 0));
   move(g, 'mortgage', lots[0]); assert.equal(vietnamRent(g, lots[0]), 0); move(g, 'redeem', lots[0]); assert.ok(vietnamRent(g, lots[0]) > 0);
