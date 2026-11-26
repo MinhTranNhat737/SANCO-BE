@@ -70,6 +70,7 @@ export function vietnamRent(g,index,diceTotal=7){const p=g.party,c=VN_CELLS[inde
 function landing(g,roll,allowCard=true){const p=g.party,me=player(g),c=VN_CELLS[me.position];p.stage='end';p.message=`Đến ${c.name}`;
   if(ownable(c)){const owner=p.property[c.index];if(!owner)p.stage='buy';else if(owner!==me.side){bill(g,vietnamRent(g,c.index,p.diceValues.reduce((a,b)=>a+b,0)),owner,`Thuê ${c.name}`,undefined,'rent',c.index);p.stage='buyout';}}
   else if(c.type==='tax')bill(g,c.amount,null,`Nộp ${c.name}`,undefined,'tax',c.index);
+  else if(c.type==='rest'){const bonus=100;me.cash+=bonus;emitEvent(g,{type:'salary',side:me.side,title:'Nghỉ chân nhận thưởng',reason:`Dừng tại ô Nghỉ chân · Nhận +${bonus} triệu`,amount:bonus,lot:c.index});ledger(g,'rest',`${me.side} dừng tại Nghỉ chân · nhận +${bonus} triệu`,bonus);}
   else if(c.type==='gotojail')jail(g,'Dừng tại ô Vào Trại giam');
   else if(allowCard&&['chance','community'].includes(c.type)){
     const card=p.profile?((roll()-1)*6+roll()-1)%12+1:roll(),deck=c.type,deckName=deck==='chance'?'Cơ hội':'Khí vận';

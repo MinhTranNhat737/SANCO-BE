@@ -114,8 +114,24 @@ test('Market rent, construction and salary use integer rounding and debit exactl
   assert.equal(vietnamRent(g,1),Math.ceil(VN_CELLS[1].rent[0]*2*1.25));const before=p.players[0].cash;
   move(g,'build',1);assert.equal(p.players[0].cash,before-Math.ceil(VN_CELLS[1].buildCost*.8));assert.equal(p.ledger.at(-1).amount,vietnamBuildCost(p,1));
   const utility=VN_CELLS.find(cell=>cell.type==='utility');p.property[utility.index]='R';assert.equal(vietnamRent(g,utility.index,3),Math.ceil(3*5*1.25));
-  const salary=estateSalary(p);assert.equal(salary,438);p.players[0].position=47;const cashBefore=p.players[0].cash;const dice=[1,2];move(g,'roll',-1,{},()=>dice.shift()||1);
+  const salary=estateSalary(p);assert.equal(salary,625);p.players[0].position=47;const cashBefore=p.players[0].cash;const dice=[1,2];move(g,'roll',-1,{},()=>dice.shift()||1);
   assert.equal(p.events.find(event=>event.type==='salary').amount,salary);assert.equal(p.players[0].cash,cashBefore+salary);
+});
+
+test('Start awards +500 and Free Parking (Nghỉ chân) awards +100 on landing',()=>{
+  const g=make(2,'classic'),p=g.party;
+  p.players[0].position=21;
+  const beforeRest=p.players[0].cash;
+  const diceRest=[1,2];move(g,'roll',-1,{},()=>diceRest.shift()||1);
+  assert.equal(p.players[0].position,24);
+  assert.equal(p.players[0].cash,beforeRest+100);
+  p.stage='end';move(g,'end');
+
+  p.players[1].position=45;
+  const beforeStart=p.players[1].cash;
+  const diceStart=[1,2];move(g,'roll',-1,{},()=>diceStart.shift()||1);
+  assert.equal(p.players[1].position,0);
+  assert.equal(p.players[1].cash,beforeStart+500);
 });
 
 test('All 12 event cards are reachable and completed without negative balances',()=>{
