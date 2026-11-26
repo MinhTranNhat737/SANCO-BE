@@ -125,10 +125,12 @@ test('Chance/community cards, tax, jail, rent and cash deductions emit structure
   const taxCell = VN_CELLS.find(c => c.type === 'tax');
   const jailIdx = VN_CELLS.find(c => c.type === 'gotojail').index;
 
-  // Draw card 2 (repair fee -120) on Chance
+  // Land on Chance -> waits in draw_card stage until player clicks the deck -> draws card 2 (repair fee -120)
   p.players[0].position = (chanceIdx - 3 + 48) % 48;
-  const seq1 = [1, 2, 2];
+  const seq1 = [1, 2];
   vietnamMove(g, { action: 'roll', to: -1 }, () => seq1.shift() || 1);
+  assert.equal(p.stage, 'draw_card');
+  vietnamMove(g, { action: 'draw_card', to: chanceIdx }, () => 2);
   assert.ok(p.events.some(e => e.type === 'card' && e.deck === 'chance' && e.card === 2 && e.amount === -120));
   assert.ok(p.events.some(e => e.type === 'loss' && e.amount === -120 && e.reason.includes('Sửa chữa')));
 

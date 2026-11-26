@@ -153,15 +153,19 @@ test('Start awards +500 and Free Parking (Nghỉ chân) awards +100 on landing',
   assert.equal(p.players[1].cash, beforeStart + 500);
 });
 
-test('All 12 event cards are reachable on Cơ hội and Khí vận without negative balances', () => {
+test('All 12 event cards require clicking draw_card on Cơ hội / Khí vận and complete without negative balances', () => {
   const chance = VN_CELLS.find(cell => cell.type === 'chance' && cell.index >= 3).index;
   for (let card = 1; card <= 12; card++) {
     const g = make(4), p = g.party; p.property.fill(null); p.players[0].position = chance - 3;
-    const dice = [1, 2, Math.floor((card - 1) / 6) + 1, (card - 1) % 6 + 1]; move(g, 'roll', -1, {}, () => dice.shift() || 1);
+    const rollDice = [1, 2]; move(g, 'roll', -1, {}, () => rollDice.shift() || 1);
+    assert.equal(p.stage, 'draw_card', 'Landing on Chance must enter draw_card stage and wait for deck click');
+    assert.deepEqual(vietnamLegal(g).map(m => m.action), ['draw_card']);
+    assert.equal(p.events.some(event => event.type === 'card'), false, 'No card drawn before clicking the deck');
+    const cardDice = [Math.floor((card - 1) / 6) + 1, (card - 1) % 6 + 1];
+    move(g, 'draw_card', chance, {}, () => cardDice.shift() || 1);
     const ev = p.events.find(event => event.type === 'card' && event.card === card);
     assert.ok(ev, `card ${card}`);
     assert.equal(ev.sourceLot, chance, `card ${card} must record exact source tile (${chance})`);
-    if ([4, 5, 6, 10].includes(card)) assert.equal(p.movement.via, chance, `movement card ${card} must walk via ${chance} first`);
     assert.notEqual(p.stage, 'debt'); assert.ok(p.players.every(player => player.cash >= 0));
   }
 });
@@ -170,11 +174,17 @@ test('Shared event cash is conserved, capped by available cash, and multi-credit
   const chance = VN_CELLS.find(cell => cell.type === 'chance' && cell.index >= 3).index;
   for (const card of [7, 8]) {
     const g = make(4), p = g.party; p.property.fill(null); p.players[0].position = chance - 3; p.players[1].cash = 3; p.players[2].cash = 0;
-    const before = cash(p), dice = [1, 2, 2, card - 6]; move(g, 'roll', -1, {}, () => dice.shift() || 1); assert.equal(cash(p), before);
+    const before = cash(p), rDice = [1, 2], cDice = [2, card - 6];
+    move(g, 'roll', -1, {}, () => rDice.shift() || 1);
+    move(g, 'draw_card', chance, {}, () => cDice.shift() || 1);
+    assert.equal(cash(p), before);
     if (card === 7) { assert.equal(p.players[1].cash, 0); assert.equal(p.players[2].cash, 0); }
   }
   const g = make(4), p = g.party; p.players[0].position = chance - 3; p.players[0].cash = 60; p.property.fill(null); p.property[1] = 'R'; p.property[3] = 'R';
-  const before = cash(p), dice = [1, 2, 2, 2]; move(g, 'roll', -1, {}, () => dice.shift() || 1); assert.equal(p.stage, 'debt'); assert.equal(p.players[0].cash, 10);
+  const before = cash(p), rDice = [1, 2], cDice = [2, 2];
+  move(g, 'roll', -1, {}, () => rDice.shift() || 1);
+  move(g, 'draw_card', chance, {}, () => cDice.shift() || 1);
+  assert.equal(p.stage, 'debt'); assert.equal(p.players[0].cash, 10);
   move(g, 'mortgage', 1); assert.equal(p.stage, 'debt'); move(g, 'mortgage', 3); assert.equal(p.stage, 'end'); assert.equal(p.payments.length, 0); assert.equal(cash(p), before + 140);
 });
 
