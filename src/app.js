@@ -17,6 +17,7 @@ import {playerRatings,leaderboard,myLeaderboardPosition,botRoster,RANKS,INITIAL_
 import {Matchmaking,matchPresets} from './matchmaking.js';
 import {createTrafficGuard,concurrencyGuard} from './traffic-guard.js';
 import proxyaddr from 'proxy-addr';
+import { adminRouter, siteSettings } from './admin.js';
 
 export async function createApplication(options = {}) {
   const db = options.db || await openDatabase(options.database);
@@ -88,6 +89,8 @@ export async function createApplication(options = {}) {
     next();
   };
   const disconnectSession = hash => { if (hash) io.in(`session:${hash}`).disconnectSockets(true); };
+  app.use('/api/admin', adminRouter({ db, required, rooms, io, online }));
+  app.get('/api/site', async (_req, res) => res.json({ settings: await siteSettings(db) }));
   app.get('/api/health', (_req, res) => res.json({ ok: true, database: db.kind }));
   app.get('/api/ready',async(_req,res)=>{try{await db.query('SELECT 1');res.json({ok:true});}catch{res.status(503).json({ok:false});}});
   app.get('/api/auth/providers', (_req, res) => res.json({ providers: oauth.providers() }));
@@ -98,7 +101,7 @@ export async function createApplication(options = {}) {
   app.get('/api/me', rate('session', 60, 60000), async (req, res) => {
     let user = await sessionFor(db, req);
     if (!user) { user = await createGuest(db); await issueSession(db, res, user.id, null, secureCookies); }
-    res.json({ user: userView(user), providers: oauth.providers() });
+    res.json({ user: userView(user), providers: oauth.providers(), settings: await siteSettings(db) });
   });
   app.patch('/api/me', required, rate('profile', 20, 60000), async (req, res) => {
     const name = validName(req.body.name);
@@ -106,6 +109,7 @@ export async function createApplication(options = {}) {
     res.json({ user: userView({ ...req.user, display_name: name }) });
   });
   app.post('/api/auth/register', required, rate('register', 8, 600000), async (req, res) => {
+    if (!(await siteSettings(db)).registration_enabled) throw new GameError('Website đang tạm dừng đăng ký mới.', 403);
     if (req.user.account_id) throw new GameError('Bạn đã đăng nhập tài khoản.');
     const { email, password } = credentials(req.body), name = validName(req.body.name);
     const passwordHash = await passwordWork(req,()=>hashPassword(password));
@@ -125,7 +129,7 @@ export async function createApplication(options = {}) {
   app.post('/api/auth/login', rate('login', 20, 600000), async (req, res) => {
     const { email, password } = credentials(req.body);
     const previous = await sessionFor(db, req);
-    const { rows } = await db.query('SELECT a.password_hash, a.email, p.id, p.display_name, p.account_id FROM accounts a JOIN players p ON p.account_id=a.id WHERE a.email=$1', [email]);
+    const { rows } = await db.query('SELECT a.password_hash, a.email, p.id, p.display_name, p.account_id, p.is_admin FROM accounts a JOIN players p ON p.account_id=a.id WHERE a.email=$1', [email]);
     const valid = await passwordWork(req,()=>verifyPassword(password, rows[0]?.password_hash || dummyHash));
     if (!rows[0] || !valid) throw new GameError('Email hoặc mật khẩu chưa đúng.', 401);
     if (previous && previous.id !== rows[0].id) {
@@ -152,10 +156,14 @@ export async function createApplication(options = {}) {
   app.get('/api/matchmaking',required,async(req,res)=>res.json({presets:matchPresets,ticket:await matchmaking.status(req.user.id)}));
   app.post('/api/matchmaking',required,rate('matchmaking',240,60000),async(req,res)=>{
     const {action,kind,preset}=req.body??{};
+    if (action==='search' && !(await siteSettings(db)).rooms_enabled) throw new GameError('Website đang tạm dừng tạo phòng mới.', 503);
     res.json({ticket:await matchmaking.update(req.user,action,action==='search'?{kind,preset}:undefined)});
   });
   app.get('/api/bots/:kind',required,async(req,res)=>res.json({bots:botRoster(req.params.kind)}));
-  app.post('/api/rooms', required, requireAccount, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity,req.body.ranked,req.body.estateMode)));
+  const newRoomsAllowed = async (_req, _res, next) => {
+    try { if (!(await siteSettings(db)).rooms_enabled) throw new GameError('Website đang tạm dừng tạo phòng mới.', 503); next(); } catch (error) { next(error); }
+  };
+  app.post('/api/rooms', required, requireAccount, newRoomsAllowed, rate('create-room', 30, 3600000), async (req, res) => res.status(201).json(await rooms.create(req.user, req.body.minutes,req.body.kind,req.body.side,req.body.capacity,req.body.ranked,req.body.estateMode)));
   app.get('/api/rooms/:id', required, async (req, res) => res.json({ room: await rooms.get(req.params.id, req.user.id) }));
   app.post('/api/rooms/:id/join', required, rate('join', 40, 60000), async (req, res) => res.json({ room: await rooms.join(req.params.id, req.user, req.body.token) }));
   app.post('/api/rooms/:id/invite', required, rate('invite', 15, 60000), async (req, res) => res.json(await rooms.invite(req.params.id, req.user.id)));
@@ -180,6 +188,7 @@ export async function createApplication(options = {}) {
       if(nonPublicQueries.some(key=>Object.hasOwn(req.query,key)))res.set('X-Robots-Tag','noindex');
       next();
     });
+    app.get(['/admin','/admin/','/admin.html'], (_req,res) => { res.set('X-Robots-Tag','noindex, nofollow'); res.sendFile(path.join(directory,'admin.html')); });
     app.get('/index.html',(req,res)=>res.redirect(308,`/${req.originalUrl.slice(req.path.length)}`));
     app.get('/choi/:page.html',(req,res)=>res.redirect(308,`/choi/${encodeURIComponent(req.params.page)}`));
     app.get('/choi/:page',(req,res,next)=>{

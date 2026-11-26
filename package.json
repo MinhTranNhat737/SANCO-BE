@@ -14,6 +14,7 @@
     "bench": "node scripts/bench-online.mjs",
     "bench:rooms": "node scripts/bench-rooms.mjs",
     "test:online": "node scripts/test-online.mjs",
+    "admin:grant": "node scripts/grant-admin.mjs",
     "db:migrate": "node src/migrate.js",
     "oauth:check": "node scripts/check-oauth.mjs",
     "engines:install": "node scripts/install-engines.mjs",

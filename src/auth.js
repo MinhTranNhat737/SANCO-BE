@@ -35,9 +35,9 @@ export function sessionToken(request) {
 export async function sessionFor(db, request) {
   const token = sessionToken(request);
   if (!/^[\w-]{43}$/.test(token)) return null;
-  const { rows } = await db.query(`SELECT p.id, p.display_name, p.account_id, a.email, s.token_hash, s.expires_at
+  const { rows } = await db.query(`SELECT p.id, p.display_name, p.account_id, a.email, p.is_admin, p.suspended_at, s.token_hash, s.expires_at
     FROM sessions s JOIN players p ON p.id = s.player_id LEFT JOIN accounts a ON a.id = p.account_id
-    WHERE s.token_hash = $1 AND s.expires_at > $2`, [digest(token), Date.now()]);
+    WHERE s.token_hash = $1 AND s.expires_at > $2 AND p.suspended_at IS NULL`, [digest(token), Date.now()]);
   return rows[0] || null;
 }
 export function cookieOptions(secure, maxAge) {
@@ -45,6 +45,8 @@ export function cookieOptions(secure, maxAge) {
   return { httpOnly: true, sameSite, secure: sameSite === 'none' ? true : secure, path: '/', ...(maxAge !== undefined ? { maxAge } : {}) };
 }
 export async function issueSession(db, response, playerId, previousHash, secure) {
+  const player = await db.query('SELECT suspended_at FROM players WHERE id=$1', [playerId]);
+  if (player.rows[0]?.suspended_at != null) throw new GameError('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.', 403);
   const token = secret(), now = Date.now();
   await db.query('INSERT INTO sessions(token_hash, player_id, expires_at, created_at) VALUES($1,$2,$3,$4)', [digest(token), playerId, now + sessionAge, now]);
   if (previousHash) await db.query('DELETE FROM sessions WHERE token_hash = $1', [previousHash]);
@@ -55,4 +57,4 @@ export async function createGuest(db) {
   await db.query('INSERT INTO players(id, display_name, created_at) VALUES($1,$2,$3)', [id, 'Bạn cờ', Date.now()]);
   return { id, display_name: 'Bạn cờ', account_id: null, email: null };
 }
-export const userView = user => ({ id: user.id, name: user.display_name, account: !!user.account_id, email: user.email || null });
+export const userView = user => ({ id: user.id, name: user.display_name, account: !!user.account_id, email: user.email || null, admin: !!user.is_admin });

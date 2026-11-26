@@ -104,3 +104,7 @@ Migration `011_matchmaking.sql` giữ điểm hiện có trong `overall`, đồn
 Kết quả và điểm được ghi cùng giao dịch, khóa theo người/môn và chống lặp theo ID ván. Ván 3–4 người so cặp rồi lấy trung bình: người thắng thắng mọi cặp, các bên còn lại hòa nhau. Ván bot rank không được undo, một người chỉ có một ván rank đang chơi ở mỗi môn, tạo lại sẽ tiếp tục ván cũ. Không hoạt động quá 5 phút nhận thua trước khi xóa bàn; điểm vẫn còn trong SQL. Phòng rank đang chơi giữ lại đến khi đồng hồ phân xử, không xóa do bộ dọn phòng.
 
 Bot dùng hàng đợi và worker thread có giới hạn; `BOT_WORKERS=1..16` để cấu hình tải CPU (mặc định số lõi khả dụng trừ một, tối đa 4). Mọi ván dùng trạng thái độc lập, hồ sơ bot có thể phục vụ nhiều người. Việc này không thay thế giới hạn triển khai một replica nêu trong hướng dẫn deploy.
+
+## Trang quản trị
+
+Mở `/admin` trên frontend để quản lý website. Xem [hướng dẫn cấp quyền và vận hành admin](ADMIN.md). Sau khi tài khoản chủ website đã đăng ký, chạy `npm run admin:grant -- owner@example.com` trên môi trường backend để cấp quyền lần đầu.

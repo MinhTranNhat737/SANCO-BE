@@ -63,6 +63,34 @@ function fakeOAuthFetch() {
   };
 }
 
+test('Pausing registration blocks new OAuth accounts while existing OAuth accounts can sign in', async () => {
+  let newIdentity = false;
+  const originalFetch = fakeOAuthFetch();
+  const app = await createApplication({database:{memory:true},disableRateLimits:true,origins:'https://sanco.games',oauth:{
+    config:{stateSecret:'test-registration-state',googleClientId:'g-id',googleClientSecret:'g-secret'},
+    fetchImpl:async (...args) => {
+      if (newIdentity && String(args[0]) === 'https://openidconnect.googleapis.com/v1/userinfo') return new Response(JSON.stringify({sub:'another-google-player',email:'new-player@example.test',email_verified:true,name:'New player'}));
+      return originalFetch(...args);
+    },
+  }});
+  await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+  const origin = `http://127.0.0.1:${app.server.address().port}`;
+  const signIn = async () => {
+    const start = await fetch(`${origin}/api/auth/google`,{redirect:'manual'});
+    const state = new URL(start.headers.get('location')).searchParams.get('state');
+    return fetch(`${origin}/api/auth/google/callback?code=test-code&state=${encodeURIComponent(state)}`,{redirect:'manual',headers:{Cookie:start.headers.get('set-cookie').split(';')[0]}});
+  };
+  try {
+    assert.equal(new URL((await signIn()).headers.get('location')).searchParams.get('auth'),'ok');
+    await app.db.query('UPDATE site_settings SET registration_enabled=FALSE WHERE id=1');
+    const existing = await signIn(); assert.equal(new URL(existing.headers.get('location')).searchParams.get('auth'),'ok');
+    newIdentity = true;
+    const blocked = await signIn(); assert.match(new URL(blocked.headers.get('location')).searchParams.get('auth_error'),/tạm dừng đăng ký/);
+    assert.ok(!blocked.headers.getSetCookie().some(c=>c.startsWith('sc_session=')));
+    assert.equal((await app.db.query('SELECT count(*)::int AS total FROM accounts')).rows[0].total,1);
+  } finally {await app.close();}
+});
+
 test('Only logged-in accounts can create rooms, and Google/Facebook OAuth preserves guest session and unlocks room creation', async () => {
   const app = await createApplication({
     database: { memory: true },

@@ -114,6 +114,8 @@ export function createOAuthService({ db, allowedOrigins, secureCookies, fetchImp
         }
       }
 
+      const settings = await client.query('SELECT registration_enabled FROM site_settings WHERE id=1');
+      if (!settings.rows[0].registration_enabled) throw new Error('Website đang tạm dừng đăng ký mới.');
       const accountId = randomUUID();
       try {
         await client.query(
